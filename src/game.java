@@ -42,6 +42,17 @@ public class game {
         return null;
     }
 
+    private void action(int action){
+        if (action <=129){
+
+        }
+    }
+
+    private void buildConnection(int action){
+
+    }
+
+
 
     private void setup() {
         deck = new deck();

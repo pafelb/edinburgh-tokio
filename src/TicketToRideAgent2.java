@@ -29,29 +29,31 @@ public class TicketToRideAgent {
     private MultiLayerNetwork mainActionHead;
     private MultiLayerNetwork fleetCompositionHead;
     private MultiLayerNetwork secondCardHead;  // For choosing the 2nd card when drawing
-    private MultiLayerNetwork cardCompositionHead;  // For choosing which cards to use for route
 
     // ===== ADJUST THESE IF YOUR STATE ENCODING CHANGES =====
-    private static final int STATE_SIZE = 300; // TODO: Change based on your state encoding size
+    private static final int STATE_SIZE = 645; // TODO: Change based on your state encoding size
 
     // ===== ADJUST THESE IF YOUR GAME BOARD CHANGES =====
-    private static final int NUM_ROUTES = 80; // TODO: Change to match number of routes on your map
+    private static final int NUM_ROUTES = 129; // TODO: Change to match number of routes on your map
     private static final int NUM_FACE_UP_CARDS = 6; // 6 face-up cards in Rails & Sails
 
     // Calculated action space sizes (don't change these)
     private static final int NUM_DRAW_ACTIONS = 2 + NUM_FACE_UP_CARDS; // 2 decks + 6 face-up = 8
     private static final int NUM_MAIN_ACTIONS = NUM_DRAW_ACTIONS + NUM_ROUTES + 2; // Draw(8) + Routes(80) + DrawDest(1) + Rebalance(1) = 90
-    private static final int NUM_FLEET_OPTIONS = 21; // 10-30 locomotives (21 options)
+    private static final int NUM_FLEET_OPTIONS = 14;
 
     // Action type boundaries for main action head
-    public static final int DRAW_TRAIN_DECK = 0;    // Draw from train deck
-    public static final int DRAW_BOAT_DECK = 1;     // Draw from boat deck
-    public static final int DRAW_FACEUP_START = 2;  // Start of face-up cards (indices 2-7)
-    public static final int DRAW_FACEUP_END = 7;    // End of face-up cards
-    public static final int CLAIM_ROUTE_START = 8;  // Start of route claiming
-    public static final int CLAIM_ROUTE_END = 87;   // End of route claiming (8 + 80 - 1)
-    public static final int DRAW_DESTINATIONS = 88; // Draw destination tickets
-    public static final int REBALANCE_FLEET = 89;   // Rebalance locomotive/boat split
+
+    public static final int CLAIM_ROUTE_START = 0;  // Start of route claiming
+    public static final int CLAIM_ROUTE_END = 128;   // End of route claiming (8 + 80 - 1)
+    public static final int DRAW_DESTINATIONS = 129; // Draw destination tickets
+    public static final int DRAW_TRAIN_DECK = 130;    // Draw from train deck
+    public static final int DRAW_BOAT_DECK = 131;     // Draw from boat deck
+    public static final int DRAW_FACEUP_START = 132;  // Start of face-up cards (indices 2-7)
+    public static final int DRAW_FACEUP_END = 138;    // End of face-up cards
+    public static final int BUILD_HARBOUR_START = 139;
+    public static final int BUILD_HARBOUR_END = 176;
+    public static final int REBALANCE_FLEET = 177;   // Rebalance locomotive/boat split
 
     private Random random = new Random();
 
@@ -168,10 +170,10 @@ public class TicketToRideAgent {
     /**
      * Get main action probabilities from state
      *
-     * @param state Float array representing game state (must be STATE_SIZE length)
-     *              TODO: You need to implement GameState.toVector() to create this
+     * @param state     Float array representing game state (must be STATE_SIZE length)
+     *                               TODO: You need to implement GameState.toVector() to create this
      * @param legalMask Boolean array marking which actions are legal (same length as NUM_MAIN_ACTIONS)
-     *                  TODO: You need to implement GameState.getLegalMainActions()
+     *                                   TODO: You need to implement GameState.getLegalMainActions()
      * @return Probability distribution over all main actions
      */
     public float[] getMainActionProbabilities(float[] state, boolean[] legalMask) {
@@ -195,11 +197,11 @@ public class TicketToRideAgent {
     /**
      * Get second card draw probabilities
      *
-     * @param state Current game state after first card was drawn
+     * @param state               Current game state after first card was drawn
      * @param drewJokerFromFaceUp True if first card was a joker from face-up cards
      *                            (means turn ends immediately, this shouldn't be called)
-     * @param legalMask Boolean array for legal second draws (8 elements: 2 decks + 6 face-up)
-     *                  TODO: Implement logic to mark jokers in face-up as illegal if first was joker
+     * @param legalMask           Boolean array for legal second draws (8 elements: 2 decks + 6 face-up)
+     *                                             TODO: Implement logic to mark jokers in face-up as illegal if first was joker
      * @return Probability distribution over second card choices
      */
     public float[] getSecondCardProbabilities(float[] state, boolean drewJokerFromFaceUp, boolean[] legalMask) {
@@ -471,7 +473,7 @@ public class TicketToRideAgent {
 
     /**
      * Example usage / training loop
-     *
+     * <p>
      * TODO: You need to implement:
      * - GameState.toVector() - convert game state to float[300]
      * - GameState.getLegalMainActions() - return boolean[90] for legal actions
@@ -496,11 +498,11 @@ public class TicketToRideAgent {
         for (int game = 0; game < 10000; game++) {
             // TODO: Implement your game simulation here
             // Example structure:
-            /*
-            Game ticketToRide = new Game();
+
+            game ticketToRide = new game();
             List<Experience> gameExperiences = new ArrayList<>();
 
-            while (!ticketToRide.isOver()) {
+            while (!ticketToRide.isOver) {
                 GameState state = ticketToRide.getCurrentState();
                 float[] stateVector = state.toVector();
                 boolean[] legalMask = state.getLegalMainActions();
@@ -548,7 +550,7 @@ public class TicketToRideAgent {
                 exp.reward = reward;
             }
             batch.addAll(gameExperiences);
-            */
+
 
             // Train every 64 games
             if (game % 64 == 0 && !batch.isEmpty()) {
