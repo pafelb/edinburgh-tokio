@@ -28,7 +28,8 @@ public class TicketToRideAgent {
     private MultiLayerNetwork sharedEncoder;
     private MultiLayerNetwork mainActionHead;
     private MultiLayerNetwork fleetCompositionHead;
-    private MultiLayerNetwork secondCardHead;  // For choosing the 2nd card when drawing
+    private MultiLayerNetwork secondCardHead;// For choosing the 2nd card when drawing
+    private MultiLayerNetwork boatUsageHead;
 
     // ===== ADJUST THESE IF YOUR STATE ENCODING CHANGES =====
     private static final int STATE_SIZE = 645; // TODO: Change based on your state encoding size
@@ -36,6 +37,8 @@ public class TicketToRideAgent {
     // ===== ADJUST THESE IF YOUR GAME BOARD CHANGES =====
     private static final int NUM_ROUTES = 129; // TODO: Change to match number of routes on your map
     private static final int NUM_FACE_UP_CARDS = 6; // 6 face-up cards in Rails & Sails
+
+    private static final int NUM_BOAT_MODES = 5;
 
     // Calculated action space sizes (don't change these)
     private static final int NUM_DRAW_ACTIONS = 2 + NUM_FACE_UP_CARDS; // 2 decks + 6 face-up = 8
@@ -165,6 +168,27 @@ public class TicketToRideAgent {
 
         secondCardHead = new MultiLayerNetwork(secondCardConf);
         secondCardHead.init();
+
+        // ===== BOAT USAGE HEAD - Decides how many boats to spend when claiming a route =====
+        MultiLayerConfiguration boatUsageConf = new NeuralNetConfiguration.Builder()
+                .seed(123)
+                .weightInit(WeightInit.XAVIER)
+                .updater(new Adam(0.001))
+                .list()
+                .layer(new DenseLayer.Builder()
+                        .nIn(128)      // same as shared encoder output size
+                        .nOut(64)
+                        .activation(Activation.RELU)
+                        .build())
+                .layer(new OutputLayer.Builder(LossFunctions.LossFunction.NEGATIVELOGLIKELIHOOD)
+                        .nIn(64)
+                        .nOut(NUM_BOAT_MODES)   // 3 modes: min / medium / max
+                        .activation(Activation.SOFTMAX)
+                        .build())
+                .build();
+
+        boatUsageHead = new MultiLayerNetwork(boatUsageConf);
+        boatUsageHead.init();
     }
 
     /**
@@ -258,6 +282,21 @@ public class TicketToRideAgent {
     }
 
     /**
+     * Get boat usage probabilities for route claiming.
+     * Only called when mainAction is a CLAIM_ROUTE_* action.
+     *
+     * @param state Float array representing game state (STATE_SIZE)
+     * @return Probability distribution over boat usage modes:
+     *         0 = minimal boats, 1 = medium, 2 = max boats
+     */
+    public float[] getBoatUsageProbabilities(float[] state) {
+        INDArray stateArray = Nd4j.create(state).reshape(1, STATE_SIZE);
+        INDArray features = sharedEncoder.output(stateArray);
+        INDArray output = boatUsageHead.output(features);
+        return output.toFloatVector();
+    }
+
+    /**
      * Get best action (greedy - for evaluation, not training)
      * Always picks the action with highest probability
      *
@@ -309,50 +348,59 @@ public class TicketToRideAgent {
      *
      * @param experiences List of (state, action, reward) tuples from multiple games
      */
-    public void trainOnBatch(List<Experience> experiences) {
-        if (experiences.isEmpty()) return;
-
+    private void trainOnBatch(List<Experience> experiences) {
         int batchSize = experiences.size();
-
-        // Prepare data for main actions
         INDArray states = Nd4j.zeros(batchSize, STATE_SIZE);
         INDArray mainActions = Nd4j.zeros(batchSize, NUM_MAIN_ACTIONS);
         INDArray rewards = Nd4j.zeros(batchSize, 1);
 
-        // Separate experiences by type for specialized head training
+        // Separate experiences by type
         List<Experience> fleetExperiences = new ArrayList<>();
         List<Experience> secondCardExperiences = new ArrayList<>();
+        List<Experience> boatUsageExperiences = new ArrayList<>();  // NEW
 
         for (int i = 0; i < batchSize; i++) {
             Experience exp = experiences.get(i);
 
-            // Fill main action data
+            // Main head data
             states.putRow(i, Nd4j.create(exp.state));
-            mainActions.put(i, exp.mainAction, 1.0);  // One-hot encoding
+            mainActions.put(i, exp.mainAction, 1.0);
             rewards.put(i, 0, exp.reward);
 
-            // Categorize hierarchical actions
+            // Fleet head samples
             if (exp.mainAction == REBALANCE_FLEET && exp.fleetAction >= 0) {
                 fleetExperiences.add(exp);
-            } else if (exp.secondCardAction >= 0) {
-                // This was a card drawing turn with a second card
+            }
+            // Second-card samples
+            else if (exp.secondCardAction >= 0) {
                 secondCardExperiences.add(exp);
+            }
+
+            // NEW: boat-usage samples only for route-claim actions
+            if (exp.boatUsageAction >= 0 &&
+                    exp.mainAction >= CLAIM_ROUTE_START &&
+                    exp.mainAction <= CLAIM_ROUTE_END) {
+
+                boatUsageExperiences.add(exp);
             }
         }
 
         // Train shared encoder + main head (always)
         trainMainHead(states, mainActions, rewards);
 
-        // Train fleet head if we have fleet rebalancing experiences
         if (!fleetExperiences.isEmpty()) {
             trainFleetHead(fleetExperiences);
         }
 
-        // Train second card head if we have card drawing experiences
         if (!secondCardExperiences.isEmpty()) {
             trainSecondCardHead(secondCardExperiences);
         }
+
+        if (!boatUsageExperiences.isEmpty()) {
+            trainBoatUsageHead(boatUsageExperiences);   // NEW
+        }
     }
+
 
     /**
      * Train the main action head and shared encoder
@@ -421,6 +469,26 @@ public class TicketToRideAgent {
         DataSet dataSet = new DataSet(features, weightedActions);
         secondCardHead.fit(dataSet);
     }
+    private void trainBoatUsageHead(List<Experience> boatExperiences) {
+        int n = boatExperiences.size();
+        INDArray states = Nd4j.zeros(n, STATE_SIZE);
+        INDArray actions = Nd4j.zeros(n, NUM_BOAT_MODES);
+        INDArray rewards = Nd4j.zeros(n, 1);
+
+        for (int i = 0; i < n; i++) {
+            Experience exp = boatExperiences.get(i);
+            states.putRow(i, Nd4j.create(exp.state));
+            actions.put(i, exp.boatUsageAction, 1.0);  // one-hot over boat modes
+            rewards.put(i, 0, exp.reward);
+        }
+
+        INDArray features = sharedEncoder.output(states);
+        INDArray weightedActions = actions.mul(rewards);
+
+        DataSet dataSet = new DataSet(features, weightedActions);
+        boatUsageHead.fit(dataSet);
+    }
+
 
     /**
      * Save all networks to disk
@@ -457,19 +525,27 @@ public class TicketToRideAgent {
      */
     public static class Experience {
         public float[] state;          // Game state when action was taken
-        public int mainAction;         // Main action chosen (0-89)
-        public int fleetAction;        // Fleet composition if rebalanced (-1 if not used)
-        public int secondCardAction;   // Second card drawn if drawing cards (-1 if not used)
-        public float reward;           // Reward for this experience (1.0 for win, -1.0 for loss)
+        public int mainAction;         // Main action chosen
+        public int fleetAction;        // Fleet composition (if used)
+        public int secondCardAction;   // Second card (if used)
+        public int boatUsageAction;    // NEW: boat mode index (0..NUM_BOAT_MODES-1) if claiming a route, -1 otherwise
+        public float reward;           // Reward for this experience
 
-        public Experience(float[] state, int mainAction, int fleetAction, int secondCardAction, float reward) {
+        public Experience(float[] state,
+                          int mainAction,
+                          int fleetAction,
+                          int secondCardAction,
+                          int boatUsageAction,
+                          float reward) {
             this.state = state;
             this.mainAction = mainAction;
             this.fleetAction = fleetAction;
             this.secondCardAction = secondCardAction;
+            this.boatUsageAction = boatUsageAction;
             this.reward = reward;
         }
     }
+
 
     /**
      * Example usage / training loop
