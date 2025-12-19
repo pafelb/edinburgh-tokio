@@ -31,9 +31,18 @@ public class TicketToRideAgent {
     private MultiLayerNetwork fleetCompositionHead;
     private MultiLayerNetwork secondCardHead;// For choosing the 2nd card when drawing
     private MultiLayerNetwork boatUsageHead;
+    // DL4J network head for ticket selection
+    private MultiLayerNetwork ticketSelectionHead;
 
     // ===== ADJUST THESE IF YOUR STATE ENCODING CHANGES =====
     private static final int STATE_SIZE = 645; // TODO: Change based on your state encoding size
+    //add discard info
+
+
+    // How many different ticket-subset classes the head can choose between
+    // Max case: 5 tickets, keep >=3 → 16 combinations
+    private static final int NUM_TICKET_MASKS = 16;
+
 
     // ===== ADJUST THESE IF YOUR GAME BOARD CHANGES =====
     private static final int NUM_ROUTES = 129; // TODO: Change to match number of routes on your map
@@ -57,7 +66,11 @@ public class TicketToRideAgent {
     public static final int DRAW_FACEUP_END = 138;    // End of face-up cards
     public static final int BUILD_HARBOUR_START = 139;
     public static final int BUILD_HARBOUR_END = 176;
-    public static final int REBALANCE_FLEET = 177;   // Rebalance locomotive/boat split
+    public static final int REBALANCE_FLEET = 177;// Rebalance locomotive/boat split
+
+
+    //TODO discard stack
+
 
     private Random random = new Random();
 
@@ -190,15 +203,39 @@ public class TicketToRideAgent {
 
         boatUsageHead = new MultiLayerNetwork(boatUsageConf);
         boatUsageHead.init();
+
+        // ===== TICKET SELECTION HEAD =====
+    // Input: shared encoder features (e.g. 128)
+    // Output: 16 mask options (some illegal depending on context)
+        MultiLayerConfiguration ticketHeadConf = new NeuralNetConfiguration.Builder()
+                .seed(123)
+                .weightInit(WeightInit.XAVIER)
+                .updater(new Adam(0.001))
+                .list()
+                .layer(new DenseLayer.Builder()
+                        .nIn(128)       // same as shared encoder output size
+                        .nOut(64)
+                        .activation(Activation.RELU)
+                        .build())
+                .layer(new OutputLayer.Builder(LossFunctions.LossFunction.NEGATIVELOGLIKELIHOOD)
+                        .nIn(64)
+                        .nOut(NUM_TICKET_MASKS)
+                        .activation(Activation.SOFTMAX)
+                        .build())
+                .build();
+
+        ticketSelectionHead = new MultiLayerNetwork(ticketHeadConf);
+        ticketSelectionHead.init();
+
     }
 
     /**
      * Get main action probabilities from state
      *
      * @param state     Float array representing game state (must be STATE_SIZE length)
-     *                                                TODO: You need to implement GameState.toVector() to create this
+     *                                                                                  TODO: You need to implement GameState.toVector() to create this
      * @param legalMask Boolean array marking which actions are legal (same length as NUM_MAIN_ACTIONS)
-     *                                                    TODO: You need to implement GameState.getLegalMainActions()
+     *                                                                                      TODO: You need to implement GameState.getLegalMainActions()
      * @return Probability distribution over all main actions
      */
     public float[] getMainActionProbabilities(float[] state, boolean[] legalMask) {
@@ -226,7 +263,7 @@ public class TicketToRideAgent {
      * @param drewJokerFromFaceUp True if first card was a joker from face-up cards
      *                            (means turn ends immediately, this shouldn't be called)
      * @param legalMask           Boolean array for legal second draws (8 elements: 2 decks + 6 face-up)
-     *                                                                        TODO: Implement logic to mark jokers in face-up as illegal if first was joker
+     *                                                                                                                              TODO: Implement logic to mark jokers in face-up as illegal if first was joker
      * @return Probability distribution over second card choices
      */
     public float[] getSecondCardProbabilities(float[] state, boolean drewJokerFromFaceUp, boolean[] legalMask) {
@@ -426,6 +463,19 @@ public class TicketToRideAgent {
     }
 
     /**
+     * Get ticket-selection probabilities for the current state.
+     * The returned array has length NUM_TICKET_MASKS (16).
+     * You still need to apply a legal mask depending on how many tickets are offered (5 or 4).
+     */
+    public float[] getTicketMaskProbabilities(float[] state) {
+        INDArray stateArray = Nd4j.create(state).reshape(1, STATE_SIZE);
+        INDArray features = sharedEncoder.output(stateArray);
+        INDArray output = ticketSelectionHead.output(features);
+        return output.toFloatVector();
+    }
+
+
+    /**
      * Train the fleet composition head
      */
     private void trainFleetHead(List<Experience> fleetExperiences) {
@@ -470,6 +520,7 @@ public class TicketToRideAgent {
         DataSet dataSet = new DataSet(features, weightedActions);
         secondCardHead.fit(dataSet);
     }
+
 
     private void trainBoatUsageHead(List<Experience> boatExperiences) {
         int n = boatExperiences.size();
@@ -531,22 +582,146 @@ public class TicketToRideAgent {
         public int fleetAction;        // Fleet composition (if used)
         public int secondCardAction;   // Second card (if used)
         public int boatUsageAction;    // NEW: boat mode index (0..NUM_BOAT_MODES-1) if claiming a route, -1 otherwise
-        public float reward;           // Reward for this experience
+        public float reward;
+        public int ticketMaskAction;  // -1 if not a ticket-selection step
+// Reward for this experience
 
         public Experience(float[] state,
                           int mainAction,
                           int fleetAction,
                           int secondCardAction,
                           int boatUsageAction,
-                          float reward) {
+                          float reward,
+                          int ticketMaskAction) {
             this.state = state;
             this.mainAction = mainAction;
             this.fleetAction = fleetAction;
             this.secondCardAction = secondCardAction;
             this.boatUsageAction = boatUsageAction;
+            this.ticketMaskAction = ticketMaskAction;
             this.reward = reward;
         }
     }
+
+    // =======================
+// CACHED FORWARD PASS API
+// =======================
+
+    // Cache: last encoded features and head outputs for the most recent evaluate() call
+    private INDArray cachedFeatures = null;
+
+    private float[] cachedMainActionProbs = null;     // softmax probs from mainActionHead
+    private float[] cachedSecondCardProbs = null;     // softmax probs from secondCardHead
+    private float[] cachedFleetOptionProbs = null;    // softmax probs from fleetCompositionHead
+    private float[] cachedBoatUsageProbs = null;      // softmax probs from boatUsageHead
+    private float[] cachedTicketMaskProbs = null;     // softmax probs from ticketSelectionHead
+
+    /**
+     * One "agent call": run the shared encoder ONCE and compute all head outputs.
+     * Call this once per decision point (per state).
+     *
+     * After calling evaluate(state), you can read any head output via the getters below
+     * without re-running the encoder.
+     */
+    public void evaluate(float[] stateVector) {
+        if (stateVector == null) {
+            throw new IllegalArgumentException("stateVector is null");
+        }
+        if (stateVector.length != STATE_SIZE) {
+            throw new IllegalArgumentException(
+                    "Expected state size " + STATE_SIZE + ", got " + stateVector.length
+            );
+        }
+
+        // 1) Encode state through shared backbone
+        INDArray stateArray = Nd4j.create(stateVector).reshape(1, STATE_SIZE);
+        cachedFeatures = sharedEncoder.output(stateArray, false);
+
+        // 2) Run all heads (each head should end in SOFTMAX if it's a categorical distribution)
+        cachedMainActionProbs = mainActionHead.output(cachedFeatures, false).toFloatVector();
+        cachedSecondCardProbs = secondCardHead.output(cachedFeatures, false).toFloatVector();
+        cachedFleetOptionProbs = fleetCompositionHead.output(cachedFeatures, false).toFloatVector();
+        cachedBoatUsageProbs = boatUsageHead.output(cachedFeatures, false).toFloatVector();
+        cachedTicketMaskProbs = ticketSelectionHead.output(cachedFeatures, false).toFloatVector();
+    }
+
+    /**
+     * Optional: clear cached outputs (not required, but useful for debugging).
+     */
+    public void clearCache() {
+        cachedFeatures = null;
+        cachedMainActionProbs = null;
+        cachedSecondCardProbs = null;
+        cachedFleetOptionProbs = null;
+        cachedBoatUsageProbs = null;
+        cachedTicketMaskProbs = null;
+    }
+
+// =======================
+// GETTERS FOR HEAD OUTPUTS
+// =======================
+
+    /**
+     * Main action distribution (routes, draw tickets, draw cards, etc.).
+     * If legalMask != null, illegal actions are zeroed and the distribution renormalized.
+     *
+     * NOTE: evaluate(state) must be called first.
+     */
+    public float[] getMainActionProbabilitiesFromCache(boolean[] legalMask) {
+        ensureEvaluated(cachedMainActionProbs, "mainAction");
+        return (legalMask == null) ? cachedMainActionProbs.clone() : applyMask(cachedMainActionProbs, legalMask);
+    }
+
+    /**
+     * Second-card distribution when drawing travel cards.
+     * If drewJokerFromFaceUp == true, turn ends and this returns all zeros.
+     *
+     * NOTE: evaluate(state) must be called first (for the state *after* the first draw if you do 2-step draws).
+     */
+    public float[] getSecondCardProbabilitiesFromCache(boolean drewJokerFromFaceUp, boolean[] legalMask) {
+        if (drewJokerFromFaceUp) {
+            return new float[NUM_DRAW_ACTIONS];
+        }
+        ensureEvaluated(cachedSecondCardProbs, "secondCard");
+        return (legalMask == null) ? cachedSecondCardProbs.clone() : applyMask(cachedSecondCardProbs, legalMask);
+    }
+
+    /**
+     * Fleet split distribution (initial fleet choice).
+     */
+    public float[] getFleetCompositionProbabilitiesFromCache(boolean[] legalMask) {
+        ensureEvaluated(cachedFleetOptionProbs, "fleetComposition");
+        return (legalMask == null) ? cachedFleetOptionProbs.clone() : applyMask(cachedFleetOptionProbs, legalMask);
+    }
+
+    /**
+     * Boat usage distribution (your boat-split / double-boat usage mode head).
+     */
+    public float[] getBoatUsageProbabilitiesFromCache(boolean[] legalMask) {
+        ensureEvaluated(cachedBoatUsageProbs, "boatUsage");
+        return (legalMask == null) ? cachedBoatUsageProbs.clone() : applyMask(cachedBoatUsageProbs, legalMask);
+    }
+
+    /**
+     * Ticket subset distribution (mask index: 0..15, with legalMask selecting 16 or 15 valid entries).
+     */
+    public float[] getTicketMaskProbabilitiesFromCache(boolean[] legalMask) {
+        ensureEvaluated(cachedTicketMaskProbs, "ticketSelection");
+        return (legalMask == null) ? cachedTicketMaskProbs.clone() : applyMask(cachedTicketMaskProbs, legalMask);
+    }
+
+// =======================
+// INTERNAL HELPERS
+// =======================
+
+    private void ensureEvaluated(float[] cached, String headName) {
+        if (cached == null) {
+            throw new IllegalStateException(
+                    "Head '" + headName + "' is not available. Did you forget to call evaluate(stateVector) first?"
+            );
+        }
+    }
+
 
 
     /**
@@ -558,7 +733,7 @@ public class TicketToRideAgent {
      * - GameState.getLegalSecondCardActions() - return boolean[8] for legal second card draws
      * - Game simulation loop
      */
-    public static void main(String[] args) throws IOException {
+   /* public static void main(String[] args) throws IOException {
         TicketToRideAgent agent = new TicketToRideAgent();
 
         // Try to load existing model
@@ -647,5 +822,5 @@ public class TicketToRideAgent {
         // Save final model
         agent.saveModel("model_final");
         System.out.println("Training complete!");
-    }
+    }*/
 }

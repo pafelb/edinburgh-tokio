@@ -45,6 +45,48 @@ public class deck {
         24 joker
 
            */
+
+    public  String cardIdToString(int id) {
+        // Lookup table of size 25 (0..24)
+        final String[] names = {
+                "white s",   // 0
+                "green s",   // 1
+                "red s",     // 2
+                "black s",   // 3
+                "pink s",    // 4
+                "yellow s",  // 5
+
+                "white d",   // 6
+                "green d",   // 7
+                "red d",     // 8
+                "black d",   // 9
+                "pink d",    // 10
+                "yellow d",  // 11
+
+                "white l",   // 12
+                "green l",   // 13
+                "red l",     // 14
+                "black l",   // 15
+                "pink l",    // 16
+                "yellow l",  // 17
+
+                "white h",   // 18
+                "green h",   // 19
+                "red h",     // 20
+                "black h",   // 21
+                "pink h",    // 22
+                "yellow h",  // 23
+
+                "joker"      // 24
+        };
+
+        if (id < 0 || id >= names.length) {
+            throw new IllegalArgumentException("Invalid card id: " + id);
+        }
+
+        return names[id];
+    }
+
     public Stack<Integer> boats = new Stack<>();
     public Stack<Integer> locos = new Stack<>();
     public Stack<Integer> boats_discard = new Stack<>();
@@ -67,6 +109,18 @@ public class deck {
         }
         Collections.shuffle(locos, new Random(0));
         Collections.shuffle(boats, new Random(0));
+    }
+    public void shuffle(){
+        if (boats.isEmpty()){
+           boats = (Stack<Integer>) boats_discard.clone();
+           Collections.shuffle(boats);
+           boats_discard.clear();
+        }
+        if (locos.isEmpty()){
+            locos = (Stack<Integer>) locos_discard.clone();
+            Collections.shuffle(locos);
+            locos_discard.clear();
+        }
     }
 
 
