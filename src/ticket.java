@@ -7,4 +7,5 @@ public class ticket {
     int reward;
     int rewardInOrder;
     int penalty;
+    int id;
 }

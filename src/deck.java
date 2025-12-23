@@ -91,6 +91,8 @@ public class deck {
     public Stack<Integer> locos = new Stack<>();
     public Stack<Integer> boats_discard = new Stack<>();
     public Stack<Integer> locos_discard = new Stack<>();
+    public Stack<ticket> tickets = new Stack<>();
+    public Stack<ticket> discardTickets = new Stack<>();
 
     public final int[] ammountofCards = {4,4,4,4,4,4,6,6,6,6,6,6,7,7,7,7,7,7,4,4,4,4,4,4,14};
 

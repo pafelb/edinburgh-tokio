@@ -1,4 +1,4 @@
-import java.util.Arrays;
+import java.util.*;
 
 public class game {
     private deck deck;
@@ -8,8 +8,8 @@ public class game {
     private boolean[][] tickets = new boolean[4][62];
     private int[][] boats_locos_buildt = new int[4][4];
     private int[] lane = new int[6];
+
     private int current_player_move = 0;
-    private gamestate gamestate;
     TicketToRideAgent agent = new TicketToRideAgent();
 
 
@@ -24,15 +24,11 @@ public class game {
             for (int j = 0; j != 6; j++) {
                 System.out.println(converter(j) + "single: " + cards_players[i][j] + "; double: " + cards_players[i][j + 6]);
             }
-
-
         }
         for (int i = 0; i != 6; i++) {
             System.out.print(deck.cardIdToString(lane[i]) + " ");
         }
-        boolean running = true;
-        while (running) {
-            deck.shuffle();
+        while (remaining_rounds != 0) {
 
 
 
@@ -51,6 +47,7 @@ public class game {
             remaining_rounds = 2;
         }
     }
+
 
     private void draw_from_lane(int pick, boolean lay_open_boats) {   //TODO remember to illegal out if stack is empty later
 
@@ -71,6 +68,19 @@ public class game {
         }
     }
 
+    public static class TicketDrawResult {
+        public final List<Integer> kept;
+        public final List<Integer> discarded;
+
+        public TicketDrawResult(List<Integer> kept, List<Integer> discarded) {
+            this.kept = kept;
+            this.discarded = discarded;
+        }
+    }
+
+
+
+
 
     private String converter(int i) {
         switch (i) {
@@ -90,16 +100,13 @@ public class game {
         return null;
     }
 
-    private void action(int action) {
-        if (action <= 129) {
-
-
-        }
+    //TODO UPDATE TO MAKE IT UPDATE GAMESTATE
+    private float[] buildStateVectorWithTicketOffer(int[] i, int j){
+        return new float[agent.STATE_SIZE];
     }
 
-    private void buildConnection(int action) {
 
-    }
+
 
 
     private void setup() {
@@ -128,25 +135,240 @@ public class game {
             lane[j] = deck.boats.pop();
         }
     }
-    private void build_track(connection track, int color){
-        tracks_ownership[current_player_move][track.id]=true;
-        if (track.boat){
-            int d=((track.building_cost )/2)-cards_players[current_player_move][color];
-            boats_locos_buildt[current_player_move][color]=
-            cards_players[current_player_move][color]=cards_players[current_player_move][color]-d;
-            while (cards_players[current_player_move][color+7]!=0 && d!=0){
-                d--;
-                cards_players[current_player_move][color+7]--;
+            //TODO DOUBLE BOAT SAFE STRATEGY NOT IMPLEMENTED; ADD LATER
+            //TODO CLEAN UP COLOR PREFERENCE; EITHER ALL HERE OR NONE
+    private void build_track(connection track, int color) {
+        float[] temp = agent.getCachedColorPreferenceProbsFromCache(null);
+        int need = track.building_cost;
+        Integer[] indices = new Integer[temp.length];
+        for (int i = 0; i < temp.length; i++) {
+            indices[i] = i;
+        }
+        Arrays.sort(indices, Comparator.comparingDouble(i -> temp[i]));
+
+        if (track.boat) {
+
+            // Optional safety check (cheap) – helps catch mask bugs
+            int singles = cards_players[current_player_move][color];
+            int doubles = cards_players[current_player_move][color + 6];
+            int jokers = cards_players[current_player_move][24];
+            int maxCoverage = singles + jokers + 2 * doubles;
+            if (maxCoverage < need) {
+                throw new IllegalStateException("Illegal build (mask bug): not enough boat cards for track " + track.id);
             }
-            if(d!=0){
-                while (cards_players[current_player_move][23]!=0 && d!=0){
-                    d--;
-                    cards_players[current_player_move][23]--;
-                }//TODO !!!!!
+
+            // Pay: doubles first (2 coverage each), then singles (1), then jokers (1)
+            while (need > 1 && cards_players[current_player_move][color + 6] > 0) {
+                cards_players[current_player_move][color + 6]--;
+                need -= 2;
             }
+            while (need > 0 && cards_players[current_player_move][color] > 0) {
+                cards_players[current_player_move][color]--;
+                need -= 1;
+            }
+            while (need > 0 && cards_players[current_player_move][24] > 0) {
+                cards_players[current_player_move][24]--;
+                need -= 1;
+            }
+
+            // should always be 0 if mask was correct
+            if (need != 0) {
+                throw new IllegalStateException("Payment failed unexpectedly for track " + track.id);
+            }
+
+            // Now claim ownership (after successful payment)
+            tracks_ownership[current_player_move][track.id] = true;
+
+        } else {
+            if (track.segmented) {
+                outer:
+                while (need > 0) {
+
+                    // 1) two normal train cards
+                    for (int k = 0; k < 6; k++) {
+                        int c = indices[k];
+                        if (cards_players[current_player_move][c + 12] > 1) {
+                            need -= 2;
+                            cards_players[current_player_move][c + 12] -= 2;
+                            continue outer;
+                        }
+                    }
+
+                    // 2) one normal + one harbor train card (same color)
+                    for (int k = 0; k < 6; k++) {
+                        int c = indices[k];
+                        if (cards_players[current_player_move][c + 12] > 0
+                                && cards_players[current_player_move][c + 18] > 0) {
+                            need -= 2;
+                            cards_players[current_player_move][c + 12]--;
+                            cards_players[current_player_move][c + 18]--;
+                            continue outer;
+                        }
+                    }
+
+                    // 3) two harbor train cards
+                    for (int k = 0; k < 6; k++) {
+                        int c = indices[k];
+                        if (cards_players[current_player_move][c + 18] > 1) {
+                            need -= 2;
+                            cards_players[current_player_move][c + 18] -= 2;
+                            continue outer;
+                        }
+                    }
+
+                    // 4) one normal + joker
+                    for (int k = 0; k < 6; k++) {
+                        int c = indices[k];
+                        if (cards_players[current_player_move][c + 12] > 0
+                                && cards_players[current_player_move][24] > 0) {
+                            need -= 2;
+                            cards_players[current_player_move][c + 12]--;
+                            cards_players[current_player_move][24]--;
+                            continue outer;
+                        }
+                    }
+
+                    // 5) one harbor + joker
+                    for (int k = 0; k < 6; k++) {
+                        int c = indices[k];
+                        if (cards_players[current_player_move][c + 18] > 0
+                                && cards_players[current_player_move][24] > 0) {
+                            need -= 2;
+                            cards_players[current_player_move][c + 18]--;
+                            cards_players[current_player_move][24]--;
+                            continue outer;
+                        }
+                    }
+
+                    // 6) two jokers
+                    if (cards_players[current_player_move][24] > 1) {
+                        need -= 2;
+                        cards_players[current_player_move][24] -= 2;
+                        continue;
+                    }
+
+                    // If we got here, the legal mask was wrong or state is inconsistent
+                    throw new IllegalStateException("Segmented payment failed unexpectedly for track " + track.id);
+                }
+
+                tracks_ownership[current_player_move][track.id] = true;
+            } else {
+                while (cards_players[current_player_move][color+12]!=0 && need!=0) {
+                    cards_players[current_player_move][color + 12]--;
+                    need--;
+                }
+                while (cards_players[current_player_move][color+18]!=0 && need!=0) {
+                    cards_players[current_player_move][color + 18]--;
+                    need--;
+                }
+                while (cards_players[current_player_move][24]!=0 && need!=0) {
+                    cards_players[current_player_move][24]--;
+                    need--;
+                }
+
+                if (need != 0) {
+                    throw new IllegalStateException("Payment failed unexpectedly for track " + track.id);
+                }
+
+                // Now claim ownership (after successful payment)
+                tracks_ownership[current_player_move][track.id] = true;
+
+            }
+
 
         }
     }
+
+    /**
+     * Build the state vector for the "ticket selection" phase, given the offered tickets.
+     * You implement this using your existing state encoder (set offer one-hots, set phase flag, etc.).
+     */
+    @FunctionalInterface
+    public interface TicketOfferStateBuilder {
+        float[] buildState(List<Integer> offeredTickets, boolean isStartOfGame);
+    }
+
+    /**
+     * Full destination-ticket flow:
+     * - draw 5 (start) or 4 (later) tickets from destinationDeck
+     * - build the legal mask using TicketMaskUtils
+     * - call agent.getTicketMaskProbabilities(state)
+     * - apply legal mask (renormalize)
+     * - pick a mask index (sample)
+     * - decode kept tickets using TicketMaskUtils.decodeMask(...)
+     * - return kept + discarded lists
+     *
+     * This function does NOT update your player ticket storage yet (you said you'll interpret/apply later).
+     */
+    public TicketDrawResult drawDestinationTickets(
+            boolean isStartOfGame,
+            Deque<Integer> destinationDeck,
+            Deque<Integer> destinationDiscard,
+            TicketToRideAgent agent,
+            TicketOfferStateBuilder stateBuilder
+    ) {
+        int drawCount = isStartOfGame ? 5 : 4;
+
+        // 1) Draw offered tickets
+        List<Integer> offered = new ArrayList<>(drawCount);
+        for (int i = 0; i < drawCount; i++) {
+            if (destinationDeck.isEmpty()) {
+                throw new IllegalStateException("Destination deck is empty");
+            }
+            offered.add(destinationDeck.removeFirst());
+        }
+
+        // 2) Build state for ticket selection phase (you control encoding)
+        float[] state = stateBuilder.buildState(offered, isStartOfGame);
+
+        // 3) Get probabilities from the ticket-selection head (size = TicketMaskUtils.NUM_TICKET_MASKS = 16)
+        float[] probs = agent.getTicketMaskProbabilities(state);
+
+        // 4) Legal mask from your utils (int[16] with 1 = legal, 0 = illegal)
+        int[] legalInt = TicketMaskUtils.buildLegalMaskForTicketSelection(offered.size());
+
+        // 5) Apply mask + renormalize (same behavior as your agent.applyMask, but that method is private)
+        float sum = 0f;
+        for (int i = 0; i < probs.length; i++) {
+            if (i >= legalInt.length || legalInt[i] == 0) {
+                probs[i] = 0f;
+            } else {
+                sum += probs[i];
+            }
+        }
+        if (sum > 0f) {
+            for (int i = 0; i < probs.length; i++) {
+                probs[i] /= sum;
+            }
+        } else {
+            // fallback: if everything became 0 (shouldn't happen), pick first legal mask
+            for (int i = 0; i < legalInt.length; i++) {
+                if (legalInt[i] == 1) {
+                    probs[i] = 1f;
+                    break;
+                }
+            }
+        }
+
+        // 6) Choose mask index (sampling for exploration; you can replace with argmax if you want deterministic)
+        int chosenMaskIndex = agent.sampleAction(probs);
+
+        // 7) Decode kept tickets using your utils (this already handles 5-ticket vs 4-ticket internally)
+        List<Integer> kept = TicketMaskUtils.decodeMask(chosenMaskIndex, offered);
+
+        // 8) Everything else is discarded
+        List<Integer> discarded = new ArrayList<>(offered);
+        discarded.removeAll(kept);
+
+        // 9) Put discarded tickets into discard pile (optional; you said you'll interpret further later)
+        // If you don't want to discard here yet, just remove this loop.
+        for (int t : discarded) {
+            destinationDiscard.addLast(t);
+        }
+
+        return new TicketDrawResult( kept, discarded);
+    }
+
 
 
 }
