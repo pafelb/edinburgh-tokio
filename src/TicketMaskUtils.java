@@ -3,7 +3,8 @@ import java.util.List;
 
 public final class TicketMaskUtils {
 
-    private TicketMaskUtils() {}
+    private TicketMaskUtils() {
+    }
 
     // Precompute mask tables for 5-ticket start (keep >=3) and 4-ticket later (keep >=1)
     // Each mask is a boolean[] of length numTickets (5 or 4)
@@ -39,7 +40,7 @@ public final class TicketMaskUtils {
 
         return result;
     }
-
+    //TODO THINK ABOUT SOLUTION FOR TAKING TICKETS IF AVAILABE STACK IS UNDER 4
     /**
      * Build the legal mask for the ticket-selection head.
      * - For 5 tickets: all START masks are legal → first 16 entries = 1
@@ -78,7 +79,7 @@ public final class TicketMaskUtils {
         boolean[] pattern;
         if (n == 5) {
             pattern = START_MASKS_5_FROM_5_MIN3.get(maskIndex);
-        } else if (n == 4) {
+        } else if (n < 5 && n != 0) {
             pattern = MID_MASKS_4_FROM_4_MIN1.get(maskIndex);
         } else {
             throw new IllegalArgumentException("Unsupported number of offered tickets: " + n);

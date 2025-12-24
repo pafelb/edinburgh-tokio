@@ -1,4 +1,5 @@
 import java.util.Collections;
+import java.util.List;
 import java.util.Random;
 import java.util.Stack;
 
@@ -46,7 +47,7 @@ public class deck {
 
            */
 
-    public  String cardIdToString(int id) {
+    public String cardIdToString(int id) {
         // Lookup table of size 25 (0..24)
         final String[] names = {
                 "white s",   // 0
@@ -92,9 +93,9 @@ public class deck {
     public Stack<Integer> boats_discard = new Stack<>();
     public Stack<Integer> locos_discard = new Stack<>();
     public Stack<ticket> tickets = new Stack<>();
-    public Stack<ticket> discardTickets = new Stack<>();
 
-    public final int[] ammountofCards = {4,4,4,4,4,4,6,6,6,6,6,6,7,7,7,7,7,7,4,4,4,4,4,4,14};
+
+    public final int[] ammountofCards = {4, 4, 4, 4, 4, 4, 6, 6, 6, 6, 6, 6, 7, 7, 7, 7, 7, 7, 4, 4, 4, 4, 4, 4, 14};
 
     private void init() {
         for (int i = 0; i <= 11; i++) {
@@ -112,16 +113,42 @@ public class deck {
         Collections.shuffle(locos, new Random(0));
         Collections.shuffle(boats, new Random(0));
     }
-    public void shuffle(){
-        if (boats.isEmpty()){
-           boats = (Stack<Integer>) boats_discard.clone();
-           Collections.shuffle(boats);
-           boats_discard.clear();
+
+    public void shuffle() {
+        if (boats.isEmpty()) {
+            boats = (Stack<Integer>) boats_discard.clone();
+            Collections.shuffle(boats);
+            boats_discard.clear();
         }
-        if (locos.isEmpty()){
+        if (locos.isEmpty()) {
             locos = (Stack<Integer>) locos_discard.clone();
             Collections.shuffle(locos);
             locos_discard.clear();
+        }
+    }
+
+    public void discardShuffle(List<ticket> discard) {
+        tickets.addAll(discard);
+        Collections.shuffle(tickets);
+    }
+
+    public void discardAfterTrackBuild(int color) {
+        if (color < 12) {
+            boats_discard.add(color);
+        } else {
+            locos_discard.add(color);
+        }
+    }
+
+    public void discardAfterTrackBuild(int color, int amount) {
+        if (color < 12) {
+            for (int i = 0; i != amount; i++) {
+                boats_discard.add(color);
+            }
+        } else {
+            for (int i = 0; i != amount; i++) {
+                locos_discard.add(color);
+            }
         }
     }
 
