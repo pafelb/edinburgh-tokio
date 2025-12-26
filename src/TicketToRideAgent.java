@@ -87,7 +87,7 @@ public class TicketToRideAgent {
         DRAW_CARDS,      // 0
         CLAIM_ROUTE,     // 1
         DRAW_TICKETS,    // 2
-        BUILD_HARBOR,    // 3
+        BUILD_HARBOR,  //TODO  // 3
         EXCHANGE_PIECES  // 4
     }
 

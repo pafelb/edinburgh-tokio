@@ -8,7 +8,7 @@ public class game {
     private int[][] cards_players = new int[4][25];
     private boolean[][] tracks_ownership = new boolean[4][129];
     private boolean[][] tickets = new boolean[4][62];
-    private int[][] boats_locos_buildt = new int[4][4];
+    private int[][] boats_locos_buildt = new int[4][2];
     private int[] lane = new int[6];
     private int pointsPunished = 0;
     private gamestate gamestate;
@@ -99,6 +99,27 @@ public class game {
                 return "yellow ";
         }
         return null;
+    }
+
+    private void changeSplit(int i){
+        splitLocos[current_player_move]=agent.sampleAction(agent.getFleetCompositionProbabilitiesFromCache(maskBuilderSplit(new float[i])));
+    }
+    //TODO !!!!!!! CHECK FOR UPDATE AFTER BUILDING DOUBLE BOAT CARD FOR BOATS LOCOS BUILDT
+    private boolean[] maskBuilderSplit(float[] r){
+        boolean[] mask = new  boolean[r.length];
+        Arrays.fill(mask,true);
+        int boats = boats_locos_buildt[current_player_move][0]-35;
+        int locos = boats_locos_buildt[current_player_move][1]-10;
+        while (locos >0){
+            mask[locos]=false;
+            locos--;
+        }
+        while (boats >0){
+            mask[boats]=false;
+            boats--;
+        }
+        mask[splitLocos[current_player_move]]= r[1337 /*TODO TAKE VECTOR SPACE*/]!=0.0f; // IF FIRSTROUND IGNORE THAT YOU CANNOT take your current split
+        return mask;
     }
 
     //TODO UPDATE TO MAKE IT UPDATE GAMESTATE
@@ -291,14 +312,8 @@ public class game {
         }
     }
 
-    /**
-     * Build the state vector for the "ticket selection" phase, given the offered tickets.
-     * You implement this using your existing state encoder (set offer one-hots, set phase flag, etc.).
-     */
-    @FunctionalInterface
-    public interface TicketOfferStateBuilder {
-        float[] buildState(List<ticket> offeredTickets, boolean isStartOfGame);
-    }
+
+
 
     /**
      * Full destination-ticket flow:
@@ -312,72 +327,7 @@ public class game {
      * <p>
      * This function does NOT update your player ticket storage yet (you said you'll interpret/apply later).
      */
-    public TicketDrawResult drawDestinationTickets(
-            boolean isStartOfGame,
-            Deque<ticket> destinationDeck,
-            Deque<Integer> destinationDiscard,
-            TicketToRideAgent agent,
-            TicketOfferStateBuilder stateBuilder //TODO DELETE ALL AGENT REFERENCES, CLASS CONTAINS AGENT
-    ) {
-        int drawCount = isStartOfGame ? 5 : 4;
 
-        // 1) Draw offered tickets
-        List<ticket> offered = new ArrayList<>(drawCount);
-        for (int i = 0; i < drawCount; i++) {
-            if (destinationDeck.isEmpty()) {
-                throw new IllegalStateException("Destination deck is empty");
-            }
-            offered.add(destinationDeck.removeFirst());
-        }
-
-        // 2) Build state for ticket selection phase (you control encoding)
-        float[] state = stateBuilder.buildState(offered, isStartOfGame);  //TODO STATEBUILDER
-
-        // 3) Get probabilities from the ticket-selection head (size = TicketMaskUtils.NUM_TICKET_MASKS = 16)
-        float[] probs = agent.getTicketMaskProbabilities(state);
-
-        // 4) Legal mask from your utils (int[16] with 1 = legal, 0 = illegal)
-        int[] legalInt = TicketMaskUtils.buildLegalMaskForTicketSelection(offered.size());
-
-        // 5) Apply mask + renormalize (same behavior as your agent.applyMask, but that method is private)
-        float sum = 0f;
-        for (int i = 0; i < probs.length; i++) {
-            if (i >= legalInt.length || legalInt[i] == 0) {
-                probs[i] = 0f;
-            } else {
-                sum += probs[i];
-            }
-        }
-        if (sum > 0f) {
-            for (int i = 0; i < probs.length; i++) {
-                probs[i] /= sum;
-            }
-        } else {
-            // fallback: if everything became 0 (shouldn't happen), pick first legal mask
-            for (int i = 0; i < legalInt.length; i++) {
-                if (legalInt[i] == 1) {
-                    probs[i] = 1f;
-                    break;
-                }
-            }
-        }
-
-        // 6) Choose mask index (sampling for exploration; you can replace with argmax if you want deterministic)
-        int chosenMaskIndex = agent.sampleAction(probs);
-
-        // 7) Decode kept tickets using your utils (this already handles 5-ticket vs 4-ticket internally)
-        List<ticket> kept = TicketMaskUtils.decodeMask(chosenMaskIndex, offered);
-
-        // 8) Everything else is discarded
-        List<ticket> discarded = new ArrayList<>(offered);
-        discarded.removeAll(kept);
-
-        // 9) Put discarded tickets into discard pile (optional; you said you'll interpret further later)
-        // If you don't want to discard here yet, just remove this loop.
-        deck.discardShuffle(discarded);
-
-        return new TicketDrawResult(kept, discarded);
-    }
 
     private void drawTickets(boolean firstround) {
         Stack<ticket> offered = new Stack<>();
