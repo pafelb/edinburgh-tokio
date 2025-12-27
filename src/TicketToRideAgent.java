@@ -78,10 +78,6 @@ public class TicketToRideAgent {
     private float[] cachedColorPreferenceProbs = null; //
 
 
-
-
-
-
     // ===== MAIN ACTION ENUM (optional but recommended) =====
     public enum MainAction {
         DRAW_CARDS,      // 0
@@ -101,6 +97,8 @@ public class TicketToRideAgent {
     private MultiLayerNetwork fleetCompositionHead;
     private MultiLayerNetwork boatUsageHead;
     private MultiLayerNetwork colorPreferenceHead;
+    private MultiLayerNetwork resourceValueHead;
+    private MultiLayerNetwork doubleBiasHead;
 
 
     private Random random = new Random();
@@ -298,6 +296,45 @@ public class TicketToRideAgent {
         colorPreferenceHead = new MultiLayerNetwork(colorPreferenceConf);
         colorPreferenceHead.init();
 
+        //decides opportunity cost of each double single joker/normal harbour wildcard/harbour single wildcard
+        MultiLayerConfiguration resourceValueConf = new NeuralNetConfiguration.Builder()
+                .seed(123)
+                .weightInit(WeightInit.XAVIER)
+                .updater(new Adam(0.001))
+                .list()
+                .layer(new DenseLayer.Builder()
+                        .nIn(128)
+                        .nOut(32)
+                        .activation(Activation.RELU)
+                        .build())
+                .layer(new OutputLayer.Builder(LossFunctions.LossFunction.MSE)
+                        .nOut(3)                 // double, single, wild
+                        .activation(Activation.SIGMOID)
+                        .build())
+                .build();
+        resourceValueHead = new MultiLayerNetwork(resourceValueConf);
+        resourceValueHead.init();
+
+        //gives bias for choosing to build double boats instead of single boats
+        MultiLayerConfiguration doubleBiasConf = new NeuralNetConfiguration.Builder()
+                .seed(123)
+                .weightInit(WeightInit.XAVIER)
+                .updater(new Adam(0.001))
+                .list()
+                .layer(new DenseLayer.Builder()
+                        .nIn(128)
+                        .nOut(32)
+                        .activation(Activation.RELU)
+                        .build())
+                .layer(new OutputLayer.Builder(LossFunctions.LossFunction.MSE)
+                        .nOut(6)                 // per-color double bias
+                        .activation(Activation.SIGMOID)
+                        .build())
+                .build();
+        doubleBiasHead = new MultiLayerNetwork(doubleBiasConf);
+        doubleBiasHead.init();
+
+
 
 
 
@@ -307,9 +344,9 @@ public class TicketToRideAgent {
      * Get main action probabilities from state
      *
      * @param state     Float array representing game state (must be STATE_SIZE length)
-     *                                                                                                   TODO: You need to implement GameState.toVector() to create this
+     *                                                                                                                    TODO: You need to implement GameState.toVector() to create this
      * @param legalMask Boolean array marking which actions are legal (same length as NUM_MAIN_ACTIONS)
-     *                                                                                                       TODO: You need to implement GameState.getLegalMainActions()
+     *                                                                                                                        TODO: You need to implement GameState.getLegalMainActions()
      * @return Probability distribution over all main actions
      */
     public float[] getMainActionProbabilities(float[] state, boolean[] legalMask) {
@@ -337,7 +374,7 @@ public class TicketToRideAgent {
      * @param drewJokerFromFaceUp True if first card was a joker from face-up cards
      *                            (means turn ends immediately, this shouldn't be called)
      * @param legalMask           Boolean array for legal second draws (8 elements: 2 decks + 6 face-up)
-     *                                                                                                                                                         TODO: Implement logic to mark jokers in face-up as illegal if first was joker
+     *                                                                                                                                                                                    TODO: Implement logic to mark jokers in face-up as illegal if first was joker
      * @return Probability distribution over second card choices
      */
     public float[] getSecondCardProbabilities(float[] state, boolean drewJokerFromFaceUp, boolean[] legalMask) {
@@ -702,13 +739,11 @@ public class TicketToRideAgent {
         // 2) Run all heads (each head should end in SOFTMAX if it's a categorical distribution)
         cachedMainActionProbs = mainActionHead.output(cachedFeatures, false).toFloatVector();
         cachedPickMaterialProbs = drawPickHead.output(cachedFeatures, false).toFloatVector();
-        cachedRefillDeckProbs = refillDeckHead.output(cachedFeatures,false).toFloatVector();
+        cachedRefillDeckProbs = refillDeckHead.output(cachedFeatures, false).toFloatVector();
         cachedTicketMaskProbs = ticketSelectionHead.output(cachedFeatures, false).toFloatVector();
         cachedFleetCompositionProbs = fleetCompositionHead.output(cachedFeatures, false).toFloatVector();
         cachedBoatUsageProbs = boatUsageHead.output(cachedFeatures, false).toFloatVector();
-        cachedColorPreferenceProbs = colorPreferenceHead.output(cachedFeatures,false).toFloatVector();
-
-
+        cachedColorPreferenceProbs = colorPreferenceHead.output(cachedFeatures, false).toFloatVector();
 
 
     }
@@ -780,8 +815,8 @@ public class TicketToRideAgent {
         return (legalMask == null) ? cachedTicketMaskProbs.clone() : applyMask(cachedTicketMaskProbs, legalMask);
     }
 
-    public float[] getCachedColorPreferenceProbsFromCache(boolean[] legalmask){
-        ensureEvaluated(cachedColorPreferenceProbs, "ColorPreferences" );
+    public float[] getCachedColorPreferenceProbsFromCache(boolean[] legalmask) {
+        ensureEvaluated(cachedColorPreferenceProbs, "ColorPreferences");
         return (legalmask == null) ? cachedColorPreferenceProbs.clone() : applyMask(cachedColorPreferenceProbs, legalmask);
     }
 

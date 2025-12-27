@@ -311,6 +311,7 @@ public class game {
 
         }
     }
+    //TODO FUNCTION FOR PREFERENCE MAXIMIASTION
 
 
 
