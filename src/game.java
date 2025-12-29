@@ -1,3 +1,4 @@
+import it.unimi.dsi.fastutil.Hash;
 import org.datavec.api.writable.Text;
 
 import java.util.*;
@@ -13,6 +14,7 @@ public class game {
     private int pointsPunished = 0;
     private gamestate gamestate;
     private int[] splitLocos = new int[4];
+    private map map;
 
     private int current_player_move = 0;
     TicketToRideAgent agent = new TicketToRideAgent();
@@ -102,7 +104,7 @@ public class game {
     }
 
     private void changeSplit(int i){
-        splitLocos[current_player_move]=agent.sampleAction(agent.getFleetCompositionProbabilitiesFromCache(maskBuilderSplit(new float[i])));
+        splitLocos[current_player_move]=agent.sampleAction(agent.getCachedFleetCompositionProbs(maskBuilderSplit(new float[i])));
     }
     //TODO !!!!!!! CHECK FOR UPDATE AFTER BUILDING DOUBLE BOAT CARD FOR BOATS LOCOS BUILDT
     private boolean[] maskBuilderSplit(float[] r){
@@ -155,11 +157,88 @@ public class game {
         }
     }
 
+    private void buildProperTrack(){
+        int t = agent.sampleAction(agent.getCachedTrackSelectionProbs(maskTrackBuildingOptions()));
+
+    }
+
+    private int[] getBestPaymentOption(connection t){
+        HashMap<String, Float> costs = new HashMap<>();
+        float m =  agent.getCachedRessourceValueProbs(null)[0];
+        float s = agent.getCachedRessourceValueProbs(null)[1];
+        float w = agent.getCachedRessourceValueProbs(null)[0];
+        if (t.boat){
+            if (t.building_cost==1){
+                String toPut = Integer.toString(t.color);
+                int opt=0;
+                float max = 0f;
+                for (int i = 0;i!=7;i++){
+                    int temp =
+                }
+
+            }else {
+
+            }
+        }
+    }
+
+    private class ressourceResult{
+        private int primary;
+        private int secondary;
+
+        public ressourceResult(int primary, int secondary, int wildcard) {
+            this.primary = primary;
+            this.secondary = secondary;
+            this.wildcard = wildcard;
+        }
+
+        private int wildcard;
+    }
+
+    private boolean[] maskTrackBuildingOptions() {
+        boolean[] mask = new boolean[map.getConnections().length];
+        int[] max = new int[15];
+        int wBoat, gBoat, rBoat, bBoat, pBoat, yBoat, wLoco, gLoco, rLoco, bLoco, pLoco, yLoco, segmented = 0;
+        for(int i = 0;i!=6;i++){
+            max[i] = cards_players[current_player_move][i]*2+cards_players[current_player_move][i+6]+cards_players[current_player_move][24];
+        }for(int i = 6;i!=14;i++){
+            max[i] = cards_players[current_player_move][i+12]+cards_players[current_player_move][i+18]+cards_players[current_player_move][24];
+        }
+        //TODO IMPLEMENT SEGMENTED
+       //first get already doubled cards
+        int d=0;
+        int t=0;
+        for(int i=0;i!=12;i++){
+            d += (cards_players[current_player_move][i+12]+cards_players[current_player_move][i+18])/2;
+            t+= (cards_players[current_player_move][i+12]+cards_players[current_player_move][i+18])%2;
+        }
+        max[12]=d+Math.min(Math.min(t,cards_players[current_player_move][24]),cards_players[current_player_move][24]/2);
+        max[13] = Arrays.stream(max,0,6).max().getAsInt();
+        max[14] = Arrays.stream(max,6,12).max().getAsInt();
+        for (connection c : map.getConnections()){
+            boolean b = c.boat;
+            int r = !b ? 1:0;
+            if (c.color==7){
+                if (max[13 + r]>=c.building_cost)
+                    mask[c.id]=true;
+
+            }else{
+                if(max[c.color+ r*6]>=c.building_cost)
+                    mask[c.id]=true;
+            }
+
+
+        }
+        return mask;
+    }
+
+
+
 
     //TODO DOUBLE BOAT SAFE STRATEGY NOT IMPLEMENTED; ADD LATER
     //TODO CLEAN UP COLOR PREFERENCE; EITHER ALL HERE OR NONE
     private void build_track(connection track, int color) {
-        float[] temp = agent.getCachedColorPreferenceProbsFromCache(null);
+        float[] temp = agent.getCachedColorPreferenceProbs(null);
         int need = track.building_cost;
         Integer[] indices = new Integer[temp.length];
         for (int i = 0; i < temp.length; i++) {
@@ -358,7 +437,7 @@ public class game {
         }
 
         // 5) GET PROBS WITH MASK + CHOOSE MASK INDEX
-        float[] probs = agent.getTicketMaskProbabilitiesFromCache(legalBools);
+        float[] probs = agent.getCachedTicketSelectionProbs(legalBools);
         int maskIndex = agent.sampleAction(probs);
 
         if (maskIndex < 0 || maskIndex >= legalBools.length || !legalBools[maskIndex]) {

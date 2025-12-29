@@ -16,5 +16,5 @@ public class connection {
         this.reward = reward;
         this.segmented = segmented;
     }
-    // 0 white, 1 green, 2 red, 3 black, 4 pink, 5 yellow, 6 segmented
+    // 0 white, 1 green, 2 red, 3 black, 4 pink, 5 yellow, 6 segmented,7 gray
 }

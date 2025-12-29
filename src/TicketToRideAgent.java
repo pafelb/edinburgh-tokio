@@ -69,13 +69,15 @@ public class TicketToRideAgent {
     // Cache: last encoded features and head outputs for the most recent evaluate() call
     private INDArray cachedFeatures = null;
 
-    private float[] cachedMainActionProbs = null;     // softmax probs from mainActionHead
-    private float[] cachedPickMaterialProbs = null;     // softmax probs from secondCardHead
-    private float[] cachedRefillDeckProbs = null;      // sigmoid probs
-    private float[] cachedTicketMaskProbs = null;     // softmax probs from ticketSelectionHead
-    private float[] cachedFleetCompositionProbs = null;    // softmax probs from fleetCompositionHead
-    private float[] cachedBoatUsageProbs = null;      // softmax probs from boatUsageHead
-    private float[] cachedColorPreferenceProbs = null; //
+    private float[] cachedMainActionProbs = null;
+    private float[] cachedTakeMaterialProbs = null;
+    private float[] cachedRefillDeckProbs = null;
+    private float[] cachedTicketSelectionProbs = null;
+    private float[] cachedFleetCompositionProbs = null;
+    private float[] cachedColorPreferenceProbs = null;
+    private float[] cachedRessourceValueProbs = null;
+    private float[] cachedDoubleBiasProbs = null;
+    private float[] cachedTrackSelectionProbs = null;
 
 
     // ===== MAIN ACTION ENUM (optional but recommended) =====
@@ -90,15 +92,15 @@ public class TicketToRideAgent {
     //NETWORK ENCODER
     private MultiLayerNetwork sharedEncoder;
     //NETWORK HEADS
-    private MultiLayerNetwork mainActionHead;
-    private MultiLayerNetwork drawPickHead;
-    private MultiLayerNetwork refillDeckHead;
-    private MultiLayerNetwork ticketSelectionHead;
-    private MultiLayerNetwork fleetCompositionHead;
-    private MultiLayerNetwork boatUsageHead;
-    private MultiLayerNetwork colorPreferenceHead;
-    private MultiLayerNetwork resourceValueHead;
-    private MultiLayerNetwork doubleBiasHead;
+    private MultiLayerNetwork mainActionHead;       //MAIN ACTIONS
+    private MultiLayerNetwork takeMaterialHead;     //DECIDES WHAT CARD TO TAKE FROM DECK
+    private MultiLayerNetwork refillDeckHead;//DECIDES WETHER LAY BOAT OR LOCO OPEN
+    private MultiLayerNetwork ticketSelectionHead;  //DECIDES WHICH TICKET COMBINATION TO TAKE
+    private MultiLayerNetwork fleetCompositionHead; //DECIDES WHAT COMPOSITION IS BEST
+    private MultiLayerNetwork colorPreferenceHead;  //GIVES PREFERENCES OF COLORS
+    private MultiLayerNetwork resourceValueHead;    //GIVES VALUE FOR 3 POSS OF CARDS WHEN BUILDING THINGS
+    private MultiLayerNetwork doubleBiasHead;       //GIVES VALUE OF KEEPING DOUBLE BOAT IN SPEC COLOR
+    private MultiLayerNetwork trackSelectionHead;   //GIVES ID OF TRACK TO BUILDT
 
 
     private Random random = new Random();
@@ -209,29 +211,9 @@ public class TicketToRideAgent {
                         .build())
                 .build();
 
-        drawPickHead = new MultiLayerNetwork(secondCardConf);
-        drawPickHead.init();
+        takeMaterialHead = new MultiLayerNetwork(secondCardConf);
+        takeMaterialHead.init();
 
-        // ===== BOAT USAGE HEAD - Decides how many boats to spend when claiming a route =====
-        MultiLayerConfiguration boatUsageConf = new NeuralNetConfiguration.Builder()
-                .seed(123)
-                .weightInit(WeightInit.XAVIER)
-                .updater(new Adam(0.001))
-                .list()
-                .layer(new DenseLayer.Builder()
-                        .nIn(128)      // same as shared encoder output size
-                        .nOut(64)
-                        .activation(Activation.RELU)
-                        .build())
-                .layer(new OutputLayer.Builder(LossFunctions.LossFunction.NEGATIVELOGLIKELIHOOD)
-                        .nIn(64)
-                        .nOut(NUM_BOAT_MODES)   // 3 modes: min / medium / max
-                        .activation(Activation.SOFTMAX)
-                        .build())
-                .build();
-
-        boatUsageHead = new MultiLayerNetwork(boatUsageConf);
-        boatUsageHead.init();
 
         // ===== TICKET SELECTION HEAD =====
         // Input: shared encoder features (e.g. 128)
@@ -289,7 +271,7 @@ public class TicketToRideAgent {
                         .build())
                 .layer(new OutputLayer.Builder(LossFunctions.LossFunction.MSE)
                         .nIn(64)
-                        .nOut(7)
+                        .nOut(6)
                         .activation(Activation.SIGMOID)
                         .build())
                 .build();
@@ -308,6 +290,7 @@ public class TicketToRideAgent {
                         .activation(Activation.RELU)
                         .build())
                 .layer(new OutputLayer.Builder(LossFunctions.LossFunction.MSE)
+                        .nIn(32)
                         .nOut(3)                 // double, single, wild
                         .activation(Activation.SIGMOID)
                         .build())
@@ -327,6 +310,7 @@ public class TicketToRideAgent {
                         .activation(Activation.RELU)
                         .build())
                 .layer(new OutputLayer.Builder(LossFunctions.LossFunction.MSE)
+                        .nIn(32)
                         .nOut(6)                 // per-color double bias
                         .activation(Activation.SIGMOID)
                         .build())
@@ -334,77 +318,28 @@ public class TicketToRideAgent {
         doubleBiasHead = new MultiLayerNetwork(doubleBiasConf);
         doubleBiasHead.init();
 
-
-
+        MultiLayerConfiguration trackSelectionConf = new NeuralNetConfiguration.Builder()
+                .seed(123)
+                .weightInit(WeightInit.XAVIER)
+                .updater(new Adam(0.001))
+                .list()
+                .layer(new DenseLayer.Builder()
+                        .nIn(128)
+                        .nOut(128)
+                        .activation(Activation.RELU)
+                        .build())
+                .layer(new OutputLayer.Builder(LossFunctions.LossFunction.NEGATIVELOGLIKELIHOOD)
+                        .nIn(128)
+                        .nOut(128)//TODO TRACK AMMOUNT
+                        .activation(Activation.SOFTMAX)
+                        .build())
+                .build();
+        trackSelectionHead = new MultiLayerNetwork(trackSelectionConf);
+        trackSelectionHead.init();
 
 
     }
 
-    /**
-     * Get main action probabilities from state
-     *
-     * @param state     Float array representing game state (must be STATE_SIZE length)
-     *                                                                                                                    TODO: You need to implement GameState.toVector() to create this
-     * @param legalMask Boolean array marking which actions are legal (same length as NUM_MAIN_ACTIONS)
-     *                                                                                                                        TODO: You need to implement GameState.getLegalMainActions()
-     * @return Probability distribution over all main actions
-     */
-    public float[] getMainActionProbabilities(float[] state, boolean[] legalMask) {
-        INDArray stateArray = Nd4j.create(state).reshape(1, STATE_SIZE);
-
-        // Encode state through shared layers
-        INDArray features = sharedEncoder.output(stateArray);
-
-        // Get action probabilities
-        INDArray output = mainActionHead.output(features);
-        float[] probs = output.toFloatVector();
-
-        // Apply legal action mask (zeros out illegal actions and renormalizes)
-        if (legalMask != null) {
-            probs = applyMask(probs, legalMask);
-        }
-
-        return probs;
-    }
-
-    /**
-     * Get second card draw probabilities
-     *
-     * @param state               Current game state after first card was drawn
-     * @param drewJokerFromFaceUp True if first card was a joker from face-up cards
-     *                            (means turn ends immediately, this shouldn't be called)
-     * @param legalMask           Boolean array for legal second draws (8 elements: 2 decks + 6 face-up)
-     *                                                                                                                                                                                    TODO: Implement logic to mark jokers in face-up as illegal if first was joker
-     * @return Probability distribution over second card choices
-     */
-    public float[] getSecondCardProbabilities(float[] state, boolean drewJokerFromFaceUp, boolean[] legalMask) {
-        // If drew joker from face-up on first draw, turn ends (no second draw)
-        if (drewJokerFromFaceUp) {
-            return new float[NUM_DRAW_ACTIONS]; // All zeros
-        }
-
-        INDArray stateArray = Nd4j.create(state).reshape(1, STATE_SIZE);
-        INDArray features = sharedEncoder.output(stateArray);
-        INDArray output = drawPickHead.output(features);
-        float[] probs = output.toFloatVector();
-
-        // Apply legal mask (e.g., can't draw second joker from face-up)
-        if (legalMask != null) {
-            probs = applyMask(probs, legalMask);
-        }
-
-        return probs;
-    }
-
-    /**
-     * Get fleet composition probabilities (10-30 locomotives)
-     */
-    public float[] getFleetCompositionProbabilities(float[] state) {
-        INDArray stateArray = Nd4j.create(state).reshape(1, STATE_SIZE);
-        INDArray features = sharedEncoder.output(stateArray);
-        INDArray output = fleetCompositionHead.output(features);
-        return output.toFloatVector();
-    }
 
     /**
      * Sample action from probability distribution (stochastic - for training/exploration)
@@ -430,20 +365,6 @@ public class TicketToRideAgent {
         return probabilities.length - 1;
     }
 
-    /**
-     * Get boat usage probabilities for route claiming.
-     * Only called when mainAction is a CLAIM_ROUTE_* action.
-     *
-     * @param state Float array representing game state (STATE_SIZE)
-     * @return Probability distribution over boat usage modes:
-     * 0 = minimal boats, 1 = medium, 2 = max boats
-     */
-    public float[] getBoatUsageProbabilities(float[] state) {
-        INDArray stateArray = Nd4j.create(state).reshape(1, STATE_SIZE);
-        INDArray features = sharedEncoder.output(stateArray);
-        INDArray output = boatUsageHead.output(features);
-        return output.toFloatVector();
-    }
 
     /**
      * Get best action (greedy - for evaluation, not training)
@@ -573,18 +494,6 @@ public class TicketToRideAgent {
         sharedEncoder.fit(encoderData);
     }
 
-    /**
-     * Get ticket-selection probabilities for the current state.
-     * The returned array has length NUM_TICKET_MASKS (16).
-     * You still need to apply a legal mask depending on how many tickets are offered (5 or 4).
-     */
-    public float[] getTicketMaskProbabilities(float[] state) {
-        INDArray stateArray = Nd4j.create(state).reshape(1, STATE_SIZE);
-        INDArray features = sharedEncoder.output(stateArray);
-        INDArray output = ticketSelectionHead.output(features);
-        return output.toFloatVector();
-    }
-
 
     /**
      * Train the fleet composition head
@@ -629,7 +538,7 @@ public class TicketToRideAgent {
         INDArray weightedActions = actions.mul(rewards);
 
         DataSet dataSet = new DataSet(features, weightedActions);
-        drawPickHead.fit(dataSet);
+        takeMaterialHead.fit(dataSet);
     }
 
 
@@ -650,7 +559,6 @@ public class TicketToRideAgent {
         INDArray weightedActions = actions.mul(rewards);
 
         DataSet dataSet = new DataSet(features, weightedActions);
-        boatUsageHead.fit(dataSet);
     }
 
 
@@ -664,7 +572,7 @@ public class TicketToRideAgent {
         sharedEncoder.save(new File(dir, "shared_encoder.zip"));
         mainActionHead.save(new File(dir, "main_head.zip"));
         fleetCompositionHead.save(new File(dir, "fleet_head.zip"));
-        drawPickHead.save(new File(dir, "second_card_head.zip"));
+        takeMaterialHead.save(new File(dir, "second_card_head.zip"));
 
         System.out.println("Model saved to " + directory);
     }
@@ -678,7 +586,7 @@ public class TicketToRideAgent {
         sharedEncoder = MultiLayerNetwork.load(new File(dir, "shared_encoder.zip"), true);
         mainActionHead = MultiLayerNetwork.load(new File(dir, "main_head.zip"), true);
         fleetCompositionHead = MultiLayerNetwork.load(new File(dir, "fleet_head.zip"), true);
-        drawPickHead = MultiLayerNetwork.load(new File(dir, "second_card_head.zip"), true);
+        takeMaterialHead = MultiLayerNetwork.load(new File(dir, "second_card_head.zip"), true);
 
         System.out.println("Model loaded from " + directory);
     }
@@ -738,12 +646,14 @@ public class TicketToRideAgent {
 
         // 2) Run all heads (each head should end in SOFTMAX if it's a categorical distribution)
         cachedMainActionProbs = mainActionHead.output(cachedFeatures, false).toFloatVector();
-        cachedPickMaterialProbs = drawPickHead.output(cachedFeatures, false).toFloatVector();
+        cachedTakeMaterialProbs = takeMaterialHead.output(cachedFeatures, false).toFloatVector();
         cachedRefillDeckProbs = refillDeckHead.output(cachedFeatures, false).toFloatVector();
-        cachedTicketMaskProbs = ticketSelectionHead.output(cachedFeatures, false).toFloatVector();
+        cachedTicketSelectionProbs = ticketSelectionHead.output(cachedFeatures, false).toFloatVector();
         cachedFleetCompositionProbs = fleetCompositionHead.output(cachedFeatures, false).toFloatVector();
-        cachedBoatUsageProbs = boatUsageHead.output(cachedFeatures, false).toFloatVector();
         cachedColorPreferenceProbs = colorPreferenceHead.output(cachedFeatures, false).toFloatVector();
+        cachedRessourceValueProbs = resourceValueHead.output(cachedFeatures, false).toFloatVector();
+        cachedDoubleBiasProbs = doubleBiasHead.output(cachedFeatures, false).toFloatVector();
+        cachedTrackSelectionProbs = trackSelectionHead.output(cachedFeatures, false).toFloatVector();
 
 
     }
@@ -752,13 +662,15 @@ public class TicketToRideAgent {
      * Optional: clear cached outputs (not required, but useful for debugging).
      */
     public void clearCache() {
-        cachedFeatures = null;
         cachedMainActionProbs = null;
-        cachedPickMaterialProbs = null;
+        cachedTakeMaterialProbs = null;
         cachedRefillDeckProbs = null;
+        cachedTicketSelectionProbs = null;
         cachedFleetCompositionProbs = null;
-        cachedBoatUsageProbs = null;
-        cachedTicketMaskProbs = null;
+        cachedColorPreferenceProbs = null;
+        cachedRessourceValueProbs = null;
+        cachedDoubleBiasProbs = null;
+        cachedTrackSelectionProbs = null;
 
     }
 
@@ -772,53 +684,47 @@ public class TicketToRideAgent {
      * <p>
      * NOTE: evaluate(state) must be called first.
      */
-    public float[] getMainActionProbabilitiesFromCache(boolean[] legalMask) {
-        ensureEvaluated(cachedMainActionProbs, "mainAction");
+    public float[] getCachedMainActionProbs(boolean[] legalMask) {
         return (legalMask == null) ? cachedMainActionProbs.clone() : applyMask(cachedMainActionProbs, legalMask);
     }
 
-    /**
-     * Second-card distribution when drawing travel cards.
-     * If drewJokerFromFaceUp == true, turn ends and this returns all zeros.
-     * <p>
-     * NOTE: evaluate(state) must be called first (for the state *after* the first draw if you do 2-step draws).
-     */
-    public float[] getSecondCardProbabilitiesFromCache(boolean drewJokerFromFaceUp, boolean[] legalMask) {
-        if (drewJokerFromFaceUp) {
-            return new float[NUM_DRAW_ACTIONS];
-        }
-        ensureEvaluated(cachedPickMaterialProbs, "secondCard");
-        return (legalMask == null) ? cachedPickMaterialProbs.clone() : applyMask(cachedPickMaterialProbs, legalMask);
+    public float[] getCachedTakeMaterialProbs(boolean[] legalMask) {
+        return (legalMask == null) ? cachedTrackSelectionProbs.clone() : applyMask(cachedTrackSelectionProbs, legalMask);
     }
 
-    /**
-     * Fleet split distribution (initial fleet choice).
-     */
-    public float[] getFleetCompositionProbabilitiesFromCache(boolean[] legalMask) {
-        ensureEvaluated(cachedFleetCompositionProbs, "fleetComposition");
+    public float[] getCachedRefillDeckProbs(boolean[] legalMask) {
+        return (legalMask == null) ? cachedRefillDeckProbs.clone() : applyMask(cachedRefillDeckProbs, legalMask);
+    }
+
+    public float[] getCachedTicketSelectionProbs(boolean[] legalMask) {
+        return (legalMask == null) ? cachedTicketSelectionProbs.clone() : applyMask(cachedTicketSelectionProbs, legalMask);
+    }
+
+    public float[] getCachedFleetCompositionProbs(boolean[] legalMask) {
         return (legalMask == null) ? cachedFleetCompositionProbs.clone() : applyMask(cachedFleetCompositionProbs, legalMask);
     }
 
-    /**
-     * Boat usage distribution (your boat-split / double-boat usage mode head).
-     */
-    public float[] getBoatUsageProbabilitiesFromCache(boolean[] legalMask) {
-        ensureEvaluated(cachedBoatUsageProbs, "boatUsage");
-        return (legalMask == null) ? cachedBoatUsageProbs.clone() : applyMask(cachedBoatUsageProbs, legalMask);
+    public float[] getCachedColorPreferenceProbs(boolean[] legalMask) {
+        return (legalMask == null) ? cachedColorPreferenceProbs.clone() : applyMask(cachedColorPreferenceProbs, legalMask);
     }
 
-    /**
-     * Ticket subset distribution (mask index: 0..15, with legalMask selecting 16 or 15 valid entries).
-     */
-    public float[] getTicketMaskProbabilitiesFromCache(boolean[] legalMask) {
-        ensureEvaluated(cachedTicketMaskProbs, "ticketSelection");
-        return (legalMask == null) ? cachedTicketMaskProbs.clone() : applyMask(cachedTicketMaskProbs, legalMask);
+    public float[] getCachedRessourceValueProbs(boolean[] legalMask) {
+        return (legalMask == null) ? cachedRessourceValueProbs.clone() : applyMask(cachedRessourceValueProbs, legalMask);
     }
 
-    public float[] getCachedColorPreferenceProbsFromCache(boolean[] legalmask) {
-        ensureEvaluated(cachedColorPreferenceProbs, "ColorPreferences");
-        return (legalmask == null) ? cachedColorPreferenceProbs.clone() : applyMask(cachedColorPreferenceProbs, legalmask);
+    public float[] getCachedDoubleBiasProbs(boolean[] legalMask) {
+        return (legalMask == null) ? cachedDoubleBiasProbs.clone() : applyMask(cachedDoubleBiasProbs, legalMask);
     }
+
+    public float[] getCachedTrackSelectionProbs(boolean[] legalMask) {
+        return (legalMask == null) ? cachedTrackSelectionProbs.clone() : applyMask(cachedTrackSelectionProbs, legalMask);
+    }
+
+
+
+
+
+
 
 // =======================
 // INTERNAL HELPERS
