@@ -279,7 +279,6 @@ public class TicketToRideAgent {
         colorPreferenceHead.init();
 
 
-
         MultiLayerConfiguration trackSelectionConf = new NeuralNetConfiguration.Builder()
                 .seed(123)
                 .weightInit(WeightInit.XAVIER)
@@ -670,22 +669,10 @@ public class TicketToRideAgent {
         return (legalMask == null) ? cachedColorPreferenceProbs.clone() : applyMask(cachedColorPreferenceProbs, legalMask);
     }
 
-    public float[] getCachedRessourceValueProbs(boolean[] legalMask) {
-        return (legalMask == null) ? cachedRessourceValueProbs.clone() : applyMask(cachedRessourceValueProbs, legalMask);
-    }
-
-    public float[] getCachedDoubleBiasProbs(boolean[] legalMask) {
-        return (legalMask == null) ? cachedDoubleBiasProbs.clone() : applyMask(cachedDoubleBiasProbs, legalMask);
-    }
 
     public float[] getCachedTrackSelectionProbs(boolean[] legalMask) {
         return (legalMask == null) ? cachedTrackSelectionProbs.clone() : applyMask(cachedTrackSelectionProbs, legalMask);
     }
-
-
-
-
-
 
 
 // =======================
