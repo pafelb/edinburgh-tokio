@@ -271,52 +271,14 @@ public class TicketToRideAgent {
                         .build())
                 .layer(new OutputLayer.Builder(LossFunctions.LossFunction.MSE)
                         .nIn(64)
-                        .nOut(6)
+                        .nOut(25)
                         .activation(Activation.SIGMOID)
                         .build())
                 .build();
         colorPreferenceHead = new MultiLayerNetwork(colorPreferenceConf);
         colorPreferenceHead.init();
 
-        //decides opportunity cost of each double single joker/normal harbour wildcard/harbour single wildcard
-        MultiLayerConfiguration resourceValueConf = new NeuralNetConfiguration.Builder()
-                .seed(123)
-                .weightInit(WeightInit.XAVIER)
-                .updater(new Adam(0.001))
-                .list()
-                .layer(new DenseLayer.Builder()
-                        .nIn(128)
-                        .nOut(32)
-                        .activation(Activation.RELU)
-                        .build())
-                .layer(new OutputLayer.Builder(LossFunctions.LossFunction.MSE)
-                        .nIn(32)
-                        .nOut(3)                 // double, single, wild
-                        .activation(Activation.SIGMOID)
-                        .build())
-                .build();
-        resourceValueHead = new MultiLayerNetwork(resourceValueConf);
-        resourceValueHead.init();
 
-        //gives bias for choosing to build double boats instead of single boats
-        MultiLayerConfiguration doubleBiasConf = new NeuralNetConfiguration.Builder()
-                .seed(123)
-                .weightInit(WeightInit.XAVIER)
-                .updater(new Adam(0.001))
-                .list()
-                .layer(new DenseLayer.Builder()
-                        .nIn(128)
-                        .nOut(32)
-                        .activation(Activation.RELU)
-                        .build())
-                .layer(new OutputLayer.Builder(LossFunctions.LossFunction.MSE)
-                        .nIn(32)
-                        .nOut(6)                 // per-color double bias
-                        .activation(Activation.SIGMOID)
-                        .build())
-                .build();
-        doubleBiasHead = new MultiLayerNetwork(doubleBiasConf);
-        doubleBiasHead.init();
 
         MultiLayerConfiguration trackSelectionConf = new NeuralNetConfiguration.Builder()
                 .seed(123)

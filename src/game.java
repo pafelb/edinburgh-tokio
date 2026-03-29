@@ -103,24 +103,25 @@ public class game {
         return null;
     }
 
-    private void changeSplit(int i){
-        splitLocos[current_player_move]=agent.sampleAction(agent.getCachedFleetCompositionProbs(maskBuilderSplit(new float[i])));
+    private void changeSplit(int i) {
+        splitLocos[current_player_move] = agent.sampleAction(agent.getCachedFleetCompositionProbs(maskBuilderSplit(new float[i])));
     }
+
     //TODO !!!!!!! CHECK FOR UPDATE AFTER BUILDING DOUBLE BOAT CARD FOR BOATS LOCOS BUILDT
-    private boolean[] maskBuilderSplit(float[] r){
-        boolean[] mask = new  boolean[r.length];
-        Arrays.fill(mask,true);
-        int boats = boats_locos_buildt[current_player_move][0]-35;
-        int locos = boats_locos_buildt[current_player_move][1]-10;
-        while (locos >0){
-            mask[locos]=false;
+    private boolean[] maskBuilderSplit(float[] r) {
+        boolean[] mask = new boolean[r.length];
+        Arrays.fill(mask, true);
+        int boats = boats_locos_buildt[current_player_move][0] - 35;
+        int locos = boats_locos_buildt[current_player_move][1] - 10;
+        while (locos > 0) {
+            mask[locos] = false;
             locos--;
         }
-        while (boats >0){
-            mask[boats]=false;
+        while (boats > 0) {
+            mask[boats] = false;
             boats--;
         }
-        mask[splitLocos[current_player_move]]= r[1337 /*TODO TAKE VECTOR SPACE*/]!=0.0f; // IF FIRSTROUND IGNORE THAT YOU CANNOT take your current split
+        mask[splitLocos[current_player_move]] = r[1337 /*TODO TAKE VECTOR SPACE*/] != 0.0f; // IF FIRSTROUND IGNORE THAT YOU CANNOT take your current split
         return mask;
     }
 
@@ -157,74 +158,158 @@ public class game {
         }
     }
 
-    private void buildProperTrack(){
-        int t = agent.sampleAction(agent.getCachedTrackSelectionProbs(maskTrackBuildingOptions()));
-
+    private void buildProperTrack() {
+        int track = agent.sampleAction(agent.getCachedTrackSelectionProbs(maskTrackBuildingOptions()));
+        List<Integer> IdsToBuild = findBestPayment(map.getConnections()[track], agent.getCachedColorPreferenceProbs(null));
+        if (IdsToBuild != null) {
+            tracks_ownership[current_player_move][track] = true;
+            for (Integer i : IdsToBuild) {
+                cards_players[current_player_move][i]--;
+            }
+        }else {
+            //OH OH only happens if legal mask not working
+        }
     }
 
-    private int[] getBestPaymentOption(connection t){
-        HashMap<String, Float> costs = new HashMap<>();
-        float m =  agent.getCachedRessourceValueProbs(null)[0];
-        float s = agent.getCachedRessourceValueProbs(null)[1];
-        float w = agent.getCachedRessourceValueProbs(null)[0];
-        if (t.boat){
-            if (t.building_cost==1){
-                String toPut = Integer.toString(t.color);
-                int opt=0;
-                float max = 0f;
-                for (int i = 0;i!=7;i++){
-                    int temp =
-                }
+    /**
+     * Finds the legal card combination with the lowest total AI preference cost.
+     * Updated: building_cost now represents the total units (e.g., 6 for a 3-unit segmented track).
+     */
+    public List<Integer> findBestPayment(connection t, float[] aiPrefs) {
+        if (aiPrefs == null) return null; // Safety check for unitialized agent
 
-            }else {
+        if (t.segmented) {
+            return findBestSegmentedPayment(t, aiPrefs);
+        } else {
+            return findBestStandardPayment(t, aiPrefs);
+        }
+    }
 
+    private List<Integer> findBestSegmentedPayment(connection t, float[] aiPrefs) {
+        List<Integer> bestCombination = null;
+        float minTotalCost = Float.MAX_VALUE;
+
+        // Iterate through all 6 colors (0:white to 5:yellow)
+        for (int colorIdx = 0; colorIdx < 6; colorIdx++) {
+            // Segmented tracks use Train Singles (12-17), Harbor Trains (18-23), and Jokers (24)
+            List<Integer> candidates = new ArrayList<>();
+            int trainSingleId = colorIdx + 12;
+            int harborTrainId = colorIdx + 18;
+
+            for (int i = 0; i < cards_players[current_player_move][trainSingleId]; i++) candidates.add(trainSingleId);
+            for (int i = 0; i < cards_players[current_player_move][harborTrainId]; i++) candidates.add(harborTrainId);
+            for (int i = 0; i < cards_players[current_player_move][24]; i++) candidates.add(24);
+
+            // Per your correction: a segmented track of length 3 has building_cost = 6
+            if (candidates.size() < t.building_cost) continue;
+
+            // Sort by AI preference to find the "cheapest" non-human strategic choice
+            candidates.sort(Comparator.comparingDouble(id -> aiPrefs[id]));
+
+            List<Integer> currentCombination = new ArrayList<>(candidates.subList(0, t.building_cost));
+            float currentCost = 0;
+            for (int id : currentCombination) currentCost += aiPrefs[id];
+
+            if (currentCost < minTotalCost) {
+                minTotalCost = currentCost;
+                bestCombination = currentCombination;
             }
         }
+        return bestCombination;
     }
 
-    private class ressourceResult{
-        private int primary;
-        private int secondary;
+    private List<Integer> findBestStandardPayment(connection t, float[] aiPrefs) {
+        List<Integer> bestCombination = null;
+        float minTotalCost = Float.MAX_VALUE;
 
-        public ressourceResult(int primary, int secondary, int wildcard) {
-            this.primary = primary;
-            this.secondary = secondary;
-            this.wildcard = wildcard;
+        // Handle Gray tracks (ID 7) vs Colored tracks
+        List<Integer> validColors = new ArrayList<>();
+        if (t.color == 7) {
+            for (int i = 0; i < 6; i++) validColors.add(i);
+        } else {
+            validColors.add(t.color);
         }
 
-        private int wildcard;
+        for (int colorIdx : validColors) {
+            List<Integer> candidates = new ArrayList<>();
+            if (t.boat) {
+                // Boat cards: singles (0-5) and doubles (6-11)
+                for (int i = 0; i < cards_players[current_player_move][colorIdx]; i++) candidates.add(colorIdx);
+                for (int i = 0; i < cards_players[current_player_move][colorIdx + 6]; i++) candidates.add(colorIdx + 6);
+            } else {
+                // Train cards: singles (12-17) and harbor trains (18-23)
+                for (int i = 0; i < cards_players[current_player_move][colorIdx + 12]; i++)
+                    candidates.add(colorIdx + 12);
+                for (int i = 0; i < cards_players[current_player_move][colorIdx + 18]; i++)
+                    candidates.add(colorIdx + 18);
+            }
+            for (int i = 0; i < cards_players[current_player_move][24]; i++) candidates.add(24);
+
+            List<Integer> currentCombination = solveStandardMinCost(candidates, t.building_cost, aiPrefs);
+
+            if (currentCombination != null) {
+                float currentCost = 0;
+                for (int id : currentCombination) currentCost += aiPrefs[id];
+                if (currentCost < minTotalCost) {
+                    minTotalCost = currentCost;
+                    bestCombination = currentCombination;
+                }
+            }
+        }
+        return bestCombination;
     }
+
+    private List<Integer> solveStandardMinCost(List<Integer> candidates, int requiredCost, float[] aiPrefs) {
+        candidates.sort(Comparator.comparingDouble(id -> aiPrefs[id]));
+
+        List<Integer> chosenCards = new ArrayList<>();
+        int currentCoverage = 0;
+
+        for (int cardId : candidates) {
+            if (currentCoverage >= requiredCost) break;
+
+            // IDs 6-11 are Double Boats, worth 2 units
+            int coverage = (cardId >= 6 && cardId <= 11) ? 2 : 1;
+
+            chosenCards.add(cardId);
+            currentCoverage += coverage;
+        }
+
+        return (currentCoverage >= requiredCost) ? chosenCards : null;
+    }
+
 
     private boolean[] maskTrackBuildingOptions() {
         boolean[] mask = new boolean[map.getConnections().length];
         int[] max = new int[15];
         int wBoat, gBoat, rBoat, bBoat, pBoat, yBoat, wLoco, gLoco, rLoco, bLoco, pLoco, yLoco, segmented = 0;
-        for(int i = 0;i!=6;i++){
-            max[i] = cards_players[current_player_move][i]*2+cards_players[current_player_move][i+6]+cards_players[current_player_move][24];
-        }for(int i = 6;i!=14;i++){
-            max[i] = cards_players[current_player_move][i+12]+cards_players[current_player_move][i+18]+cards_players[current_player_move][24];
+        for (int i = 0; i != 6; i++) {
+            max[i] = cards_players[current_player_move][i] * 2 + cards_players[current_player_move][i + 6] + cards_players[current_player_move][24];
+        }
+        for (int i = 6; i != 14; i++) {
+            max[i] = cards_players[current_player_move][i + 12] + cards_players[current_player_move][i + 18] + cards_players[current_player_move][24];
         }
         //TODO IMPLEMENT SEGMENTED
-       //first get already doubled cards
-        int d=0;
-        int t=0;
-        for(int i=0;i!=12;i++){
-            d += (cards_players[current_player_move][i+12]+cards_players[current_player_move][i+18])/2;
-            t+= (cards_players[current_player_move][i+12]+cards_players[current_player_move][i+18])%2;
+        //first get already doubled cards
+        int d = 0;
+        int t = 0;
+        for (int i = 0; i != 12; i++) {
+            d += (cards_players[current_player_move][i + 12] + cards_players[current_player_move][i + 18]) / 2;
+            t += (cards_players[current_player_move][i + 12] + cards_players[current_player_move][i + 18]) % 2;
         }
-        max[12]=d+Math.min(Math.min(t,cards_players[current_player_move][24]),cards_players[current_player_move][24]/2);
-        max[13] = Arrays.stream(max,0,6).max().getAsInt();
-        max[14] = Arrays.stream(max,6,12).max().getAsInt();
-        for (connection c : map.getConnections()){
+        max[12] = d + Math.min(Math.min(t, cards_players[current_player_move][24]), cards_players[current_player_move][24] / 2);
+        max[13] = Arrays.stream(max, 0, 6).max().getAsInt();
+        max[14] = Arrays.stream(max, 6, 12).max().getAsInt();
+        for (connection c : map.getConnections()) {
             boolean b = c.boat;
-            int r = !b ? 1:0;
-            if (c.color==7){
-                if (max[13 + r]>=c.building_cost)
-                    mask[c.id]=true;
+            int r = !b ? 1 : 0;
+            if (c.color == 7) {
+                if (max[13 + r] >= c.building_cost)
+                    mask[c.id] = true;
 
-            }else{
-                if(max[c.color+ r*6]>=c.building_cost)
-                    mask[c.id]=true;
+            } else {
+                if (max[c.color + r * 6] >= c.building_cost)
+                    mask[c.id] = true;
             }
 
 
@@ -233,166 +318,7 @@ public class game {
     }
 
 
-
-
-    //TODO DOUBLE BOAT SAFE STRATEGY NOT IMPLEMENTED; ADD LATER
-    //TODO CLEAN UP COLOR PREFERENCE; EITHER ALL HERE OR NONE
-    private void build_track(connection track, int color) {
-        float[] temp = agent.getCachedColorPreferenceProbs(null);
-        int need = track.building_cost;
-        Integer[] indices = new Integer[temp.length];
-        for (int i = 0; i < temp.length; i++) {
-            indices[i] = i;
-        }
-        Arrays.sort(indices, Comparator.comparingDouble(i -> temp[i]));
-
-        if (track.boat) {
-
-            // Optional safety check (cheap) – helps catch mask bugs
-            int singles = cards_players[current_player_move][color];
-            int doubles = cards_players[current_player_move][color + 6];
-            int jokers = cards_players[current_player_move][24];
-            int maxCoverage = singles + jokers + 2 * doubles;
-            if (maxCoverage < need) {
-                throw new IllegalStateException("Illegal build (mask bug): not enough boat cards for track " + track.id);
-            }
-
-            // Pay: doubles first (2 coverage each), then singles (1), then jokers (1)
-            while (need > 1 && cards_players[current_player_move][color + 6] > 0) {
-                cards_players[current_player_move][color + 6]--;
-                deck.discardAfterTrackBuild(color + 6);
-                need -= 2;
-            }
-            while (need > 0 && cards_players[current_player_move][color] > 0) {
-                cards_players[current_player_move][color]--;
-                deck.discardAfterTrackBuild(color);
-                need -= 1;
-            }
-            while (need > 0 && cards_players[current_player_move][24] > 0) {
-                cards_players[current_player_move][24]--;
-                deck.discardAfterTrackBuild((24));
-                need -= 1;
-            }
-
-            // should always be 0 if mask was correct
-            if (need != 0) {
-                throw new IllegalStateException("Payment failed unexpectedly for track " + track.id);
-            }
-
-            // Now claim ownership (after successful payment)
-            tracks_ownership[current_player_move][track.id] = true;
-
-        } else {
-            if (track.segmented) {
-                outer:
-                while (need > 0) {
-
-                    // 1) two normal train cards
-                    for (int k = 0; k < 6; k++) {
-                        int c = indices[k];
-                        if (cards_players[current_player_move][c + 12] > 1) {
-                            need -= 2;
-                            cards_players[current_player_move][c + 12] -= 2;
-                            deck.discardAfterTrackBuild(c + 12, 2);
-                            continue outer;
-                        }
-                    }
-
-                    // 2) one normal + one harbor train card (same color)
-                    for (int k = 0; k < 6; k++) {
-                        int c = indices[k];
-                        if (cards_players[current_player_move][c + 12] > 0
-                                && cards_players[current_player_move][c + 18] > 0) {
-                            need -= 2;
-                            cards_players[current_player_move][c + 12]--;
-                            cards_players[current_player_move][c + 18]--;
-                            deck.discardAfterTrackBuild(c + 12);
-                            deck.discardAfterTrackBuild(c + 18);
-                            continue outer;
-                        }
-                    }
-
-                    // 3) two harbor train cards
-                    for (int k = 0; k < 6; k++) {
-                        int c = indices[k];
-                        if (cards_players[current_player_move][c + 18] > 1) {
-                            need -= 2;
-                            cards_players[current_player_move][c + 18] -= 2;
-                            deck.discardAfterTrackBuild(c + 18, 2);
-                            continue outer;
-                        }
-                    }
-
-                    // 4) one normal + joker
-                    for (int k = 0; k < 6; k++) {
-                        int c = indices[k];
-                        if (cards_players[current_player_move][c + 12] > 0
-                                && cards_players[current_player_move][24] > 0) {
-                            need -= 2;
-                            cards_players[current_player_move][c + 12]--;
-                            cards_players[current_player_move][24]--;
-                            deck.discardAfterTrackBuild(c + 12);
-                            deck.discardAfterTrackBuild(24);
-                            continue outer;
-                        }
-                    }
-
-                    // 5) one harbor + joker
-                    for (int k = 0; k < 6; k++) {
-                        int c = indices[k];
-                        if (cards_players[current_player_move][c + 18] > 0
-                                && cards_players[current_player_move][24] > 0) {
-                            need -= 2;
-                            cards_players[current_player_move][c + 18]--;
-                            cards_players[current_player_move][24]--;
-                            deck.discardAfterTrackBuild(c + 18);
-                            deck.discardAfterTrackBuild(24);
-                            continue outer;
-                        }
-                    }
-
-                    // 6) two jokers
-                    if (cards_players[current_player_move][24] > 1) {
-                        need -= 2;
-                        cards_players[current_player_move][24] -= 2;
-                        deck.discardAfterTrackBuild(24, 2);
-                        continue;
-                    }
-
-                    // If we got here, the legal mask was wrong or state is inconsistent
-                    throw new IllegalStateException("Segmented payment failed unexpectedly for track " + track.id);
-                }
-
-                tracks_ownership[current_player_move][track.id] = true;
-            } else {
-                while (cards_players[current_player_move][color + 12] != 0 && need != 0) {
-                    cards_players[current_player_move][color + 12]--;
-                    need--;
-                }
-                while (cards_players[current_player_move][color + 18] != 0 && need != 0) {
-                    cards_players[current_player_move][color + 18]--;
-                    need--;
-                }
-                while (cards_players[current_player_move][24] != 0 && need != 0) {
-                    cards_players[current_player_move][24]--;
-                    need--;
-                }
-
-                if (need != 0) {
-                    throw new IllegalStateException("Payment failed unexpectedly for track " + track.id);
-                }
-
-                // Now claim ownership (after successful payment)
-                tracks_ownership[current_player_move][track.id] = true;
-
-            }
-
-
-        }
-    }
     //TODO FUNCTION FOR PREFERENCE MAXIMIASTION
-
-
 
 
     /**
@@ -459,10 +385,10 @@ public class game {
             this.tickets[current_player_move][t.id] = true;
         }
     }
-    private void changeBoatLocoRatio(int newLocoAmount, boolean punish){
+
+    private void changeBoatLocoRatio(int newLocoAmount, boolean punish) {
 
     }
-
 
 
 }
