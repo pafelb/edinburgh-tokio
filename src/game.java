@@ -1,6 +1,3 @@
-import it.unimi.dsi.fastutil.Hash;
-import org.datavec.api.writable.Text;
-
 import java.util.*;
 
 public class game {
@@ -15,10 +12,17 @@ public class game {
     private gamestate gamestate;
     private int[] splitLocos = new int[4];
     private map map;
-
+    public boolean firstRound = true;
+    private float[][] destinationFullfillment = new float[4][65]; //TODO EFFICIENT CALCUlATION OF FULLFILLMENT see gamestate for info
     private int current_player_move = 0;
     TicketToRideAgent agent = new TicketToRideAgent();
-
+    private int[][] knownCards = new int[4][25];
+    private int[][] unknownCards = new int[4][2];
+    private int discardBoats;
+    private int discardLokos;
+    private int randomBoats;
+    private int randomLokos;
+    private int[]discardStack;
 
     public static void main(String[] args) {
         game game = new game();
@@ -166,7 +170,7 @@ public class game {
             for (Integer i : IdsToBuild) {
                 cards_players[current_player_move][i]--;
             }
-        }else {
+        } else {
             //OH OH only happens if legal mask not working
         }
     }
@@ -349,7 +353,7 @@ public class game {
         offered.sort(Comparator.comparingInt(t -> t.id));
 
         // 2) UPDATE GAMESTATE WITH OFFER
-        gamestate.update(offered);
+        gamestate.update();
 
         // 3) AGENT EVALUATE ON NEW STATE
         agent.evaluate(gamestate.toVector());
@@ -391,4 +395,89 @@ public class game {
     }
 
 
+    public deck getDeck() {
+        return deck;
+    }
+
+    public int getRemaining_rounds() {
+        return remaining_rounds;
+    }
+
+    public int[][] getCards_players() {
+        return cards_players;
+    }
+
+    public boolean[][] getTracks_ownership() {
+        return tracks_ownership;
+    }
+
+    public boolean[][] getTickets() {
+        return tickets;
+    }
+
+    public int[][] getBoats_locos_buildt() {
+        return boats_locos_buildt;
+    }
+
+    public int[] getLane() {
+        return lane;
+    }
+
+    public int getPointsPunished() {
+        return pointsPunished;
+    }
+
+    public gamestate getGamestate() {
+        return gamestate;
+    }
+
+    public int[] getSplitLocos() {
+        return splitLocos;
+    }
+
+    public map getMap() {
+        return map;
+    }
+
+    public int getCurrent_player_move() {
+        return current_player_move;
+    }
+
+    public float[][] getDestinationFullfillment() {
+        return destinationFullfillment;
+    }
+
+    public boolean[][] getHarbors() {
+        return harbors;
+    }
+
+    private boolean[][] harbors = new boolean[4][37]; //TODO IN SETUP
+
+    public int[][] getKnownCards() {
+        return knownCards;
+    }
+
+    public int[][] getUnknownCards() {
+        return unknownCards;
+    }
+
+    public int getRandomLokos() {
+        return randomLokos;
+    }
+
+    public int getRandomBoats() {
+        return randomBoats;
+    }
+
+    public int getDiscardBoats() {
+        return discardBoats;
+    }
+
+    public int getDiscardLokos() {
+        return discardLokos;
+    }
+
+    public int[] getDiscardStack() {
+        return discardStack;
+    }
 }
