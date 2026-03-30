@@ -23,6 +23,9 @@ public class game {
     private int randomBoats;
     private int randomLokos;
     private int[]discardStack;
+    private int[]harborsBuildt;
+    int[] ticketcount;
+    private boolean firstCardDraw;
 
     public static void main(String[] args) {
         game game = new game();
@@ -479,5 +482,20 @@ public class game {
 
     public int[] getDiscardStack() {
         return discardStack;
+    }
+    public int[] getHarborsBuildt() {
+        return harborsBuildt;
+    }
+
+    public int[] getTicketcount() {
+        return ticketcount;
+    }
+
+    public boolean isFirstCardDraw() {
+        return firstCardDraw;
+    }
+
+    public boolean isFirstRound() {
+        return firstRound;
     }
 }
